@@ -1,0 +1,93 @@
+name: Build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+            artifact: StormIsland-linux-x64
+          - name: Windows
+            os: windows-latest
+            artifact: StormIsland-windows-x64
+          - name: macOS
+            os: macos-latest
+            artifact: StormIsland-macos-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev xvfb
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test (headless match simulation)
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Client smoke test (Linux, virtual display)
+        if: runner.os == 'Linux'
+        working-directory: build/bin
+        run: |
+          STORM_AUTOTEST=1 timeout 300 xvfb-run -a -s "-screen 0 1280x720x24" ./stormisland > client.log 2>&1 || (tail -50 client.log; exit 1)
+          ls -la autotest_*.png
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist/${{ matrix.artifact }}
+          cp -r build/bin/* dist/${{ matrix.artifact }}/
+          rm -f dist/${{ matrix.artifact }}/storm_tests* dist/${{ matrix.artifact }}/client.log dist/${{ matrix.artifact }}/autotest_*.png dist/${{ matrix.artifact }}/stormisland_settings.json
+          cp README.md dist/${{ matrix.artifact }}/
+          cd dist
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a ${{ matrix.artifact }}.zip ${{ matrix.artifact }}
+          else
+            zip -r ${{ matrix.artifact }}.zip ${{ matrix.artifact }}
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}.zip
+
+      - name: Upload smoke-test screenshots
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: build/bin/autotest_*.png
+
+  release:
+    name: Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.zip

@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Storm Island Admin</title>
+<style>
+  :root {
+    --bg: #0f1420; --panel: #171e2e; --panel2: #1e2739; --line: #2a3550; --text: #e6ebf5; --muted: #8e9ab5;
+    --accent: #4fa3ff; --good: #3ecf8e; --warn: #f2b84b; --bad: #ef5b5b; --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: .3px; }
+  header .spacer { flex: 1; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; }
+  nav button { background: transparent; border: 0; color: var(--muted); padding: 7px 12px; border-radius: 8px; cursor: pointer; font: inherit; }
+  nav button.active, nav button:hover { background: var(--panel2); color: var(--text); }
+  main { max-width: 1280px; margin: 0 auto; padding: 20px; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .tile .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+  .tile .value { font-size: 26px; font-weight: 650; margin-top: 4px; }
+  h2 { font-size: 15px; margin: 22px 0 10px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  .table-wrap { overflow-x: auto; }
+  input, select, textarea { background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 7px; padding: 7px 9px; font: inherit; }
+  input[type=number] { width: 80px; }
+  button.btn { background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 7px 12px; border-radius: 7px; cursor: pointer; font: inherit; }
+  button.btn:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #051326; font-weight: 600; }
+  button.danger { color: var(--bad); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; background: var(--panel2); border: 1px solid var(--line); }
+  .pill.warmup { color: var(--warn); } .pill.countdown { color: var(--warn); } .pill.bus, .pill.playing { color: var(--good); } .pill.ended { color: var(--muted); } .pill.starting { color: var(--accent); }
+  .muted { color: var(--muted); }
+  .players { font-size: 12px; color: var(--muted); max-height: 110px; overflow: auto; margin-top: 6px; }
+  .players span { display: inline-flex; gap: 4px; align-items: center; margin: 2px 8px 2px 0; }
+  .players a { color: var(--bad); cursor: pointer; text-decoration: none; }
+  form.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  form.settings label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; }
+  form.settings label input, form.settings label select, form.settings label textarea { color: var(--text); width: 100%; }
+  .toast { position: fixed; right: 18px; bottom: 18px; background: var(--panel2); border: 1px solid var(--line); padding: 10px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; }
+  .toast.show { opacity: 1; }
+  #login { max-width: 360px; margin: 12vh auto; }
+  #login h1 { font-size: 20px; margin-top: 0; }
+  #login input { width: 100%; margin-bottom: 10px; }
+  .hidden { display: none !important; }
+  .big-bots { display: flex; gap: 10px; align-items: center; }
+  .big-bots input[type=range] { flex: 1; }
+  @media (max-width: 640px) { main { padding: 12px; } header { flex-wrap: wrap; } }
+</style>
+</head>
+<body>
+<div id="login" class="card">
+  <h1>Storm Island Admin</h1>
+  <p class="muted">Sign in with an administrator account.</p>
+  <input id="lu" placeholder="Username" autocomplete="username">
+  <input id="lp" type="password" placeholder="Password" autocomplete="current-password">
+  <button class="btn primary" style="width:100%" onclick="login()">Sign in</button>
+  <p id="lerr" style="color:var(--bad)"></p>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1>Storm Island Admin</h1>
+    <nav>
+      <button data-tab="servers" class="active">Servers</button>
+      <button data-tab="settings">Game settings</button>
+      <button data-tab="users">Players</button>
+      <button data-tab="matches">Matches</button>
+      <button data-tab="log">Audit log</button>
+    </nav>
+    <div class="spacer"></div>
+    <span id="who" class="muted"></span>
+    <button class="btn" onclick="logout()">Sign out</button>
+  </header>
+  <main>
+    <section id="tab-servers">
+      <div class="grid">
+        <div class="card tile"><div class="label">Game servers</div><div class="value" id="t-servers">-</div></div>
+        <div class="card tile"><div class="label">Players online</div><div class="value" id="t-humans">-</div></div>
+        <div class="card tile"><div class="label">Bots in play</div><div class="value" id="t-bots">-</div></div>
+        <div class="card tile"><div class="label">In queue</div><div class="value" id="t-queue">-</div></div>
+        <div class="card tile"><div class="label">Accounts</div><div class="value" id="t-accounts">-</div></div>
+        <div class="card tile"><div class="label">Matches played</div><div class="value" id="t-matches">-</div></div>
+      </div>
+
+      <h2>Default bots per match</h2>
+      <div class="card">
+        <div class="big-bots">
+          <input type="range" id="quick-bots" min="0" max="99" oninput="document.getElementById('quick-bots-n').value=this.value">
+          <input type="number" id="quick-bots-n" min="0" max="99" oninput="document.getElementById('quick-bots').value=this.value">
+          <select id="quick-diff"><option>easy</option><option>medium</option><option>hard</option><option>insane</option></select>
+          <button class="btn primary" onclick="saveQuickBots()">Save</button>
+        </div>
+        <p class="muted" style="margin-bottom:0">Every new match gets this many bots when the warmup countdown ends. You can still add or remove bots on a live server below.</p>
+      </div>
+
+      <h2>Live servers</h2>
+      <div class="card">
+        <div class="row" style="margin-bottom:12px">
+          <span class="muted">Start a new server:</span>
+          <select id="spawn-playlist"><option value="solo">Solo</option><option value="duos">Duos</option><option value="squads">Squads</option></select>
+          <span class="muted">with</span><input type="number" id="spawn-bots" value="0" min="0" max="99"><span class="muted">bots right away</span>
+          <button class="btn primary" onclick="spawnServer()">Start server</button>
+          <span id="spawn-info" class="muted"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Server</th><th>State</th><th>Players</th><th>Add or remove bots</th><th>Controls</th></tr></thead>
+            <tbody id="servers"></tbody>
+          </table>
+        </div>
+        <p id="no-servers" class="muted hidden">No game servers are running. Players who queue will start one automatically, or you can start one above.</p>
+      </div>
+    </section>
+
+    <section id="tab-settings" class="hidden">
+      <h2>Game settings</h2>
+      <div class="card">
+        <form class="settings" onsubmit="saveSettings(event)">
+          <label>Default bots per match<input type="number" name="default_bots" min="0" max="99"></label>
+          <label>Bot difficulty<select name="bot_difficulty"><option>easy</option><option>medium</option><option>hard</option><option>insane</option></select></label>
+          <label>Fill every empty slot with bots<select name="fill_bots"><option value="false">No, use the default count</option><option value="true">Yes, fill to max players</option></select></label>
+          <label>Storm speed multiplier<input type="number" name="storm_speed" min="0.1" max="10" step="0.1"></label>
+          <label>Warmup length (seconds)<input type="number" name="warmup_seconds" min="0" max="600"></label>
+          <label>Humans needed to start<input type="number" name="min_players" min="0" max="100"></label>
+          <label>Max players per server<input type="number" name="max_players_per_server" min="2" max="100"></label>
+          <label>Max auto-started servers<input type="number" name="max_servers" min="0" max="64"></label>
+          <label>Matchmaking<select name="matchmaking_enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+          <label style="grid-column:1/-1">Message of the day<textarea name="motd" rows="2"></textarea></label>
+          <div><button class="btn primary">Save settings</button></div>
+        </form>
+        <p class="muted">Running servers pick up changes within a second. Bot counts apply from the next match.</p>
+      </div>
+    </section>
+
+    <section id="tab-users" class="hidden">
+      <h2>Players</h2>
+      <div class="card">
+        <div class="row" style="margin-bottom:10px"><input id="user-q" placeholder="Search by name" oninput="loadUsers()"></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Name</th><th>Level</th><th>Coins</th><th>Wins, kills and matches</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="users"></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <section id="tab-matches" class="hidden">
+      <h2>Recent matches</h2>
+      <div class="card table-wrap"><table>
+        <thead><tr><th>#</th><th>Mode</th><th>Players</th><th>Winner</th><th>Ended</th><th>Server</th></tr></thead>
+        <tbody id="matches"></tbody>
+      </table></div>
+    </section>
+
+    <section id="tab-log" class="hidden">
+      <h2>Audit log</h2>
+      <div class="card table-wrap"><table>
+        <thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Details</th></tr></thead>
+        <tbody id="log"></tbody>
+      </table></div>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+let token = null;
+try { token = localStorage.getItem('storm_admin_token'); } catch (e) {}
+let tab = 'servers';
+let settingsLoaded = false;
+
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200); }
+async function api(method, path, body) {
+  const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { showLogin(); throw new Error('Please sign in again'); }
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+function showLogin() { document.getElementById('login').classList.remove('hidden'); document.getElementById('app').classList.add('hidden'); }
+async function login() {
+  const u = document.getElementById('lu').value, p = document.getElementById('lp').value;
+  const r = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({username: u, password: p}) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { document.getElementById('lerr').textContent = j.error || 'Sign-in failed'; return; }
+  if (!j.account.is_admin) { document.getElementById('lerr').textContent = 'This account is not an administrator.'; return; }
+  token = j.token;
+  try { localStorage.setItem('storm_admin_token', token); } catch (e) {}
+  start();
+}
+function logout() { api('POST', '/api/logout').catch(() => {}); token = null; try { localStorage.removeItem('storm_admin_token'); } catch (e) {} showLogin(); }
+document.getElementById('lp').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === b));
+  tab = b.dataset.tab;
+  document.querySelectorAll('main > section').forEach(s => s.classList.toggle('hidden', s.id !== 'tab-' + tab));
+  refresh();
+});
+
+async function start() {
+  try {
+    const me = await api('GET', '/api/me');
+    if (!me.is_admin) { showLogin(); return; }
+    document.getElementById('who').textContent = me.display_name;
+    document.getElementById('login').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    refresh();
+  } catch (e) { showLogin(); }
+}
+
+function fmtTime(sec) { sec = Math.max(0, Math.round(sec)); const m = Math.floor(sec / 60), s = sec % 60; return m + ':' + String(s).padStart(2, '0'); }
+
+async function refresh() {
+  if (!token) return;
+  try {
+    if (tab === 'servers') await loadOverview();
+    if (tab === 'settings' && !settingsLoaded) await loadSettings();
+    if (tab === 'users') await loadUsers();
+    if (tab === 'matches') await loadMatches();
+    if (tab === 'log') await loadLog();
+  } catch (e) { console.warn(e); }
+}
+setInterval(() => { if (tab === 'servers') refresh(); }, 2000);
+
+let quickInit = false;
+async function loadOverview() {
+  const o = await api('GET', '/admin/api/overview');
+  const humans = o.servers.reduce((a, s) => a + s.humans, 0), bots = o.servers.reduce((a, s) => a + s.bots, 0);
+  document.getElementById('t-servers').textContent = o.servers.length;
+  document.getElementById('t-humans').textContent = humans;
+  document.getElementById('t-bots').textContent = bots;
+  document.getElementById('t-queue').textContent = o.queued;
+  document.getElementById('t-accounts').textContent = o.stats.accounts;
+  document.getElementById('t-matches').textContent = o.stats.matches;
+  if (!quickInit) {
+    document.getElementById('quick-bots').value = o.settings.default_bots;
+    document.getElementById('quick-bots-n').value = o.settings.default_bots;
+    document.getElementById('quick-diff').value = o.settings.bot_difficulty;
+    quickInit = true;
+  }
+  const sp = o.spawning;
+  document.getElementById('spawn-info').textContent = sp.enabled ? (sp.binary_found ? '' : 'Game server binary not found: ' + sp.binary) : 'Auto-start is off (--no-spawn)';
+  const tb = document.getElementById('servers');
+  // Keep typed-in values while the table refreshes
+  const kept = {};
+  tb.querySelectorAll('input[data-keep]').forEach(i => kept[i.dataset.keep] = i.value);
+  tb.innerHTML = o.servers.map(s => `
+    <tr>
+      <td><b>${esc(s.id)}</b><div class="muted">${esc(s.host)}:${s.port} &middot; ${esc(s.playlist)}${s.managed ? ' &middot; auto-started' : ''}</div>
+          <div class="muted">up ${fmtTime(s.uptime)}${s.last_heartbeat >= 0 ? ' &middot; last heard from ' + s.last_heartbeat.toFixed(1) + 's ago' : ''}</div></td>
+      <td><span class="pill ${esc(s.state)}">${esc(s.state)}</span>
+          <div class="muted">${s.state === 'warmup' || s.state === 'countdown' ? 'starts in ' + fmtTime(s.phase_timer) : s.storm_phase >= 0 ? 'storm phase ' + (s.storm_phase + 1) : ''}</div></td>
+      <td>${s.humans} players + ${s.bots} bots / ${s.max_players}<div class="muted">${s.alive} alive${s.reserved ? ', ' + s.reserved + ' joining' : ''}</div>
+          <div class="players">${(s.player_names || []).map(n => { const id = n.split(':')[0]; const name = n.slice(id.length + 1);
+             return `<span>${esc(name)} <a title="Kick" onclick="cmd('${esc(s.id)}', {type:'kick', player_id:${Number(id)}})">&times;</a></span>`; }).join('')}</div></td>
+      <td><div class="row"><input type="number" min="1" max="99" value="${esc(kept['n-' + s.id] || 5)}" data-keep="n-${esc(s.id)}" id="n-${esc(s.id)}">
+          <button class="btn primary" onclick="cmd('${esc(s.id)}', {type:'add_bots', count:+document.getElementById('n-${esc(s.id)}').value})">Add bots</button>
+          <button class="btn" onclick="cmd('${esc(s.id)}', {type:'remove_bots', count:+document.getElementById('n-${esc(s.id)}').value})">Remove bots</button></div></td>
+      <td><div class="row">
+          <button class="btn" onclick="cmd('${esc(s.id)}', {type:'start_now'})">Start now</button>
+          <button class="btn" onclick="cmd('${esc(s.id)}', {type:'pause_storm', flag:true})">Pause storm</button>
+          <button class="btn" onclick="cmd('${esc(s.id)}', {type:'pause_storm', flag:false})">Resume storm</button>
+          <button class="btn" onclick="broadcast('${esc(s.id)}')">Message</button>
+          <button class="btn danger" onclick="if(confirm('End the current match?')) cmd('${esc(s.id)}', {type:'end_match'})">End match</button>
+          <button class="btn danger" onclick="if(confirm('Shut this server down?')) cmd('${esc(s.id)}', {type:'shutdown'})">Shut down</button>
+      </div></td>
+    </tr>`).join('');
+  document.getElementById('no-servers').classList.toggle('hidden', o.servers.length > 0);
+}
+
+async function cmd(id, body) {
+  try { await api('POST', `/admin/api/servers/${encodeURIComponent(id)}/command`, body); toast('Sent: ' + body.type.replace('_', ' ')); setTimeout(refresh, 1200); }
+  catch (e) { toast(e.message); }
+}
+function broadcast(id) { const t = prompt('Message to show every player on this server:'); if (t) cmd(id, {type: 'message', text: t}); }
+async function spawnServer() {
+  try {
+    const r = await api('POST', '/admin/api/servers/spawn', { playlist: document.getElementById('spawn-playlist').value, bots: +document.getElementById('spawn-bots').value });
+    toast('Started ' + r.server_id); setTimeout(refresh, 1500);
+  } catch (e) { toast(e.message); }
+}
+async function saveQuickBots() {
+  try {
+    await api('PUT', '/admin/api/settings', { default_bots: +document.getElementById('quick-bots-n').value, bot_difficulty: document.getElementById('quick-diff').value });
+    settingsLoaded = false; toast('Default bots saved');
+  } catch (e) { toast(e.message); }
+}
+
+async function loadSettings() {
+  const s = await api('GET', '/admin/api/settings');
+  const f = document.querySelector('form.settings');
+  for (const [k, v] of Object.entries(s)) { const el = f.elements[k]; if (el) el.value = String(v); }
+  settingsLoaded = true;
+}
+async function saveSettings(ev) {
+  ev.preventDefault();
+  const f = ev.target, body = {};
+  for (const el of f.elements) {
+    if (!el.name) continue;
+    if (el.type === 'number') body[el.name] = Number(el.value);
+    else if (el.value === 'true' || el.value === 'false') body[el.name] = el.value === 'true';
+    else body[el.name] = el.value;
+  }
+  try { await api('PUT', '/admin/api/settings', body); toast('Settings saved'); quickInit = false; } catch (e) { toast(e.message); }
+}
+
+async function loadUsers() {
+  const q = document.getElementById('user-q').value;
+  const us = await api('GET', '/admin/api/users?q=' + encodeURIComponent(q));
+  document.getElementById('users').innerHTML = us.map(u => `
+    <tr><td><b>${esc(u.display_name)}</b><div class="muted">@${esc(u.username)}${u.is_admin ? ' &middot; admin' : ''}</div></td>
+      <td>${u.level}</td><td>${u.coins}</td>
+      <td>${u.stats.wins} / ${u.stats.kills} / ${u.stats.matches}</td>
+      <td>${u.banned ? '<span class="pill" style="color:var(--bad)">banned</span>' : '<span class="pill">active</span>'}</td>
+      <td><div class="row">
+        <button class="btn" onclick="userAct('${u.id}','coins',{amount:+prompt('Coins to add (use a minus sign to remove):','500')||0})">Coins</button>
+        <button class="btn" onclick="userAct('${u.id}','grant',{item_id:'*'})">Give all cosmetics</button>
+        <button class="btn" onclick="userAct('${u.id}','admin',{is_admin:${!u.is_admin}})">${u.is_admin ? 'Remove admin' : 'Make admin'}</button>
+        <button class="btn danger" onclick="userAct('${u.id}','ban',{banned:${!u.banned}})">${u.banned ? 'Unban' : 'Ban'}</button>
+      </div></td></tr>`).join('');
+}
+async function userAct(id, action, body) { try { await api('POST', `/admin/api/users/${id}/${action}`, body); toast('Updated'); loadUsers(); } catch (e) { toast(e.message); } }
+
+async function loadMatches() {
+  const ms = await api('GET', '/admin/api/matches');
+  document.getElementById('matches').innerHTML = ms.map(m => `<tr><td>${m.id}</td><td>${esc(m.playlist)}</td><td>${m.players}</td><td>${esc(m.winner)}</td>
+    <td>${new Date(m.ended_at * 1000).toLocaleString()}</td><td class="muted">${esc(m.server_id)}</td></tr>`).join('');
+}
+async function loadLog() {
+  const ls = await api('GET', '/admin/api/log');
+  document.getElementById('log').innerHTML = ls.map(l => `<tr><td>${new Date(l.at * 1000).toLocaleString()}</td><td>${esc(l.admin)}</td><td>${esc(l.action)}</td><td class="muted">${esc(l.details)}</td></tr>`).join('');
+}
+
+if (token) start(); else showLogin();
+</script>
+</body>
+</html>

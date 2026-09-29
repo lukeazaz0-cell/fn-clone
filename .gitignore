@@ -1,0 +1,11 @@
+build/
+build-*/
+dist/
+*.db
+*.db-shm
+*.db-wal
+stormisland_settings.json
+autotest_*.png
+.vscode/
+.idea/
+*.swp
