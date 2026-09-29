@@ -27,6 +27,10 @@ bool textBox(Rectangle r, std::string& value, const std::string& placeholder, in
 bool slider(Rectangle r, float& value, float lo, float hi, int id);
 bool checkbox(Rectangle r, bool& value, const std::string& label);
 bool hovered(Rectangle r);
+// Capture/release the mouse only when the state changes. raylib's Enable/DisableCursor
+// warp the pointer to the window center, so calling them every frame freezes the mouse.
+// Returns true on the frame the state changed.
+bool setMouseCaptured(bool captured);
 void clearFocus();
 int focused();
 

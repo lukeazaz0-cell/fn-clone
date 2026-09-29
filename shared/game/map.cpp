@@ -277,24 +277,50 @@ void GameMap::wallRun(bool alongX, float fixed, float from, float to, float y0, 
     int n = std::max(1, (int)std::round(len / 2.5f));
     float seg = len / n;
     float hp = m == Material::Wood ? 150 : m == Material::Brick ? 250 : 350;
-    auto panel = [&](float s0, float s1, float ya, float yb) {
-        if (yb - ya < 0.05f) return;
-        if (alongX) box({s0, ya, fixed - thick / 2}, {s1, yb, fixed + thick / 2}, m, c, hp, true, style);
-        else box({fixed - thick / 2, ya, s0}, {fixed + thick / 2, yb, s1}, m, c, hp, true, style);
+    auto panel = [&](float s0, float s1, float ya, float yb) -> uint32_t {
+        if (yb - ya < 0.05f) return INVALID_ID;
+        if (alongX) return box({s0, ya, fixed - thick / 2}, {s1, yb, fixed + thick / 2}, m, c, hp, true, style);
+        return box({fixed - thick / 2, ya, s0}, {fixed + thick / 2, yb, s1}, m, c, hp, true, style);
     };
+    // Non-colliding detail (glass, frames) aligned with the wall
+    auto detail = [&](DecorKind k, float s0, float s1, float ya, float yb, float depth, Color4 col, uint32_t link) {
+        AABB b = alongX ? AABB({s0, ya, fixed - depth}, {s1, yb, fixed + depth}) : AABB({fixed - depth, ya, s0}, {fixed + depth, yb, s1});
+        addBoxDecor(k, b, col, link);
+    };
+    Color4 trim = style == 1 ? rgb(220, 225, 235) : shade(c, 0.62f);
     for (int i = 0; i < n; i++) {
         float s0 = from + i * seg, s1 = s0 + seg;
         bool door = doorAt >= 0 && doorAt >= s0 && doorAt < s1;
         bool window = !door && windowEvery > 0 && i % windowEvery == 1 && i != n - 1;
         if (door) {
-            panel(s0, s1, y0 + 2.6f, y0 + h);
+            uint32_t top = panel(s0, s1, y0 + 2.6f, y0 + h);
+            detail(DecorKind::Trim, s0, s0 + 0.12f, y0, y0 + 2.6f, thick * 0.5f + 0.04f, trim, top);
+            detail(DecorKind::Trim, s1 - 0.12f, s1, y0, y0 + 2.6f, thick * 0.5f + 0.04f, trim, top);
+            detail(DecorKind::Trim, s0, s1, y0 + 2.5f, y0 + 2.65f, thick * 0.5f + 0.04f, trim, top);
         } else if (window) {
-            panel(s0, s1, y0, y0 + 1.1f);
+            uint32_t low = panel(s0, s1, y0, y0 + 1.1f);
             panel(s0, s1, y0 + 2.4f, y0 + h);
+            float in = 0.12f;
+            detail(DecorKind::Glass, s0 + in, s1 - in, y0 + 1.1f, y0 + 2.4f, 0.03f, style == 1 ? rgb(120, 205, 235) : rgb(160, 205, 230), low);
+            detail(DecorKind::Trim, s0, s1, y0 + 1.02f, y0 + 1.14f, thick * 0.5f + 0.08f, trim, low); // sill
+            detail(DecorKind::Trim, s0, s0 + in, y0 + 1.1f, y0 + 2.4f, thick * 0.5f + 0.02f, trim, low);
+            detail(DecorKind::Trim, s1 - in, s1, y0 + 1.1f, y0 + 2.4f, thick * 0.5f + 0.02f, trim, low);
+            detail(DecorKind::Trim, (s0 + s1) / 2 - 0.04f, (s0 + s1) / 2 + 0.04f, y0 + 1.1f, y0 + 2.4f, 0.05f, trim, low); // mullion
+            detail(DecorKind::Trim, s0, s1, y0 + 2.34f, y0 + 2.42f, thick * 0.5f + 0.03f, trim, low);
         } else {
             panel(s0, s1, y0, y0 + h);
         }
     }
+}
+
+void GameMap::addBoxDecor(DecorKind k, const AABB& b, Color4 c, uint32_t link) {
+    Decor d;
+    d.kind = k;
+    d.pos = b.center();
+    d.size = b.size() * 0.5f;
+    d.color = c;
+    d.linkedShape = link;
+    decor.push_back(d);
 }
 
 float GameMap::house(float cx, float cz, float w, float d, int floors, Material m, Color4 wallC, Color4 roofC, bool loot, int roofStyle) {
@@ -348,6 +374,12 @@ float GameMap::house(float cx, float cz, float w, float d, int floors, Material 
         ramp({x0 - 0.5f, top, z0 - 0.5f}, {x1 + 0.5f, top + rh, cz}, RAMP_PZ, Material::Wood, roofC, 180);
         ramp({x0 - 0.5f, top, cz}, {x1 + 0.5f, top + rh, z1 + 0.5f}, RAMP_NZ, Material::Wood, shade(roofC, 0.9f), 180);
         box({x0, top - 0.25f, z0}, {x1, top, z1}, m, floorC, 200);
+        // Chimney
+        if (rng_.chance(0.6f)) {
+            float chx = x0 + w * 0.25f, chz = cz - d * 0.2f;
+            box({chx - 0.45f, top, chz - 0.45f}, {chx + 0.45f, top + rh + 1.4f, chz + 0.45f}, Material::Brick, rgb(150, 80, 65), 200);
+            box({chx - 0.55f, top + rh + 1.4f, chz - 0.55f}, {chx + 0.55f, top + rh + 1.6f, chz + 0.55f}, Material::Brick, rgb(90, 85, 85), 100);
+        }
         // Gable ends (stepped) so the attic is enclosed
         for (int i = 0; i < 3; i++) {
             float hh = rh * (i + 1) / 3.5f;

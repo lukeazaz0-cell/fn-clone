@@ -12,6 +12,7 @@
 namespace client {
 
 namespace {
+Color darker4(Color c) { return {(unsigned char)(c.r * 0.6f), (unsigned char)(c.g * 0.6f), (unsigned char)(c.b * 0.6f), c.a}; }
 bool newer16(uint16_t a, uint16_t b) { return (int16_t)(a - b) > 0; }
 float angleLerp(float a, float b, float t) { return a + wrapAngle(b - a) * t; }
 }
@@ -26,7 +27,7 @@ GameClient::GameClient(NetClient& net, Settings& settings, AudioSystem& audio) :
 GameClient::~GameClient() {
     worldR_.unload();
     light_.unload();
-    EnableCursor();
+    ui::setMouseCaptured(false);
 }
 
 void GameClient::initMap(uint32_t seed) {
@@ -536,7 +537,7 @@ bool GameClient::frame(float dt) {
     if (mapReady_) for (auto& s : snaps) applySnapshot(s);
 
     if (net_.state == NetClient::State::Rejected || net_.state == NetClient::State::TimedOut) {
-        EnableCursor();
+        ui::setMouseCaptured(false);
         ClearBackground(ui::BG);
         ui::beginFrame();
         float w = (float)GetScreenWidth(), h = (float)GetScreenHeight();
@@ -565,8 +566,9 @@ bool GameClient::frame(float dt) {
         if (IsKeyPressed(KEY_TAB) && localControllable()) { inventoryOpen_ = !inventoryOpen_; mapOpen_ = false; }
     }
     overlay = mapOpen_ || inventoryOpen_ || paused_;
-    if (overlay || (result_.has && !(self_.flags & PF_ALIVE))) EnableCursor();
-    else DisableCursor();
+    bool wantCapture = !(overlay || (result_.has && !(self_.flags & PF_ALIVE))) && IsWindowFocused();
+    // Ignore the mouse delta on the frame capture toggles (the pointer was just warped).
+    bool captureChanged = ui::setMouseCaptured(wantCapture);
 
     if (!overlay) {
         Vector2 md = GetMouseDelta();
@@ -574,7 +576,7 @@ bool GameClient::frame(float dt) {
         const ItemStack* held = self_.selected >= 1 && self_.selected <= 5 ? &self_.inv[self_.selected - 1] : nullptr;
         if ((IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && !self_.buildMode) && held && itemDef(held->type).cls == ItemClass::Gun)
             sens /= std::max(1.0f, weaponStats(held->type, held->rarity).adsZoom * 0.8f);
-        if (IsCursorHidden()) {
+        if (IsCursorHidden() && !captureChanged) {
             camYaw_ = wrapAngle(camYaw_ - md.x * sens);
             camPitch_ = clampf(camPitch_ - md.y * sens * (settings_.invertY ? -1.0f : 1.0f), -1.45f, 1.45f);
         }
@@ -607,6 +609,11 @@ bool GameClient::frame(float dt) {
             pushAction(ActionType::JumpFromBus);
         if (haveSelf_ && !(self_.flags & PF_ALIVE) && (self_.flags & PF_SPECTATOR) && (IsKeyPressed(KEY_SPACE) || IsMouseButtonPressed(MOUSE_BUTTON_LEFT)))
             pushAction(ActionType::Spectate);
+    }
+
+    if (settings_.autotest) {
+        static float nextLog = 0;
+        if (time_ > nextLog) { TraceLog(LOG_INFO, "AUTOTEST yaw=%.3f pitch=%.3f captured=%d", camYaw_, camPitch_, (int)IsCursorHidden()); nextLog = time_ + 2.0f; }
     }
 
     // --- fixed-step input + prediction
@@ -750,9 +757,16 @@ void GameClient::renderItems() {
         if (chestOpened_[i]) continue;
         const si::Vec3& p = map_.chests[i].pos;
         if ((p - cp).lenXZ() > 150) continue;
-        drawBox(p + si::Vec3{0, 0.35f, 0}, {0.55f, 0.35f, 0.35f}, Basis(), Color{205, 150, 45, 255});
-        drawBox(p + si::Vec3{0, 0.75f, 0}, {0.57f, 0.08f, 0.37f}, Basis(), Color{235, 190, 70, 255});
-        drawBox(p + si::Vec3{0, 0.5f, 0.36f}, {0.08f, 0.1f, 0.02f}, Basis(), Color{90, 70, 30, 255});
+        Basis cb = yawBasis(map_.chests[i].yaw);
+        float glow = 0.5f + 0.5f * std::sin(time_ * 3.0f + i);
+        drawBox(p + si::Vec3{0, 0.32f, 0}, {0.55f, 0.32f, 0.35f}, cb, Color{150, 95, 40, 255});                     // wooden body
+        drawBox(p + si::Vec3{0, 0.72f, 0}, {0.56f, 0.1f, 0.36f}, cb, Color{165, 105, 45, 255});                     // lid
+        drawBox(p + si::Vec3{0, 0.83f, 0}, {0.5f, 0.04f, 0.3f}, cb, Color{175, 115, 50, 255});
+        for (int k = -1; k <= 1; k += 2) {
+            drawBox(p + si::Vec3{0, 0.45f, 0} + cb.r * (0.42f * k), {0.05f, 0.44f, 0.37f}, cb, Color{235, 190, 60, 255}); // gold bands
+        }
+        drawBox(p + si::Vec3{0, 0.64f, 0}, {0.57f, 0.035f, 0.37f}, cb, Color{235, 190, 60, 255});
+        drawBox(p + si::Vec3{0, 0.55f, 0} + cb.f * 0.36f, {0.08f, 0.1f, 0.02f}, cb, Color{(unsigned char)(200 + 55 * glow), 200, 90, 255}); // lock
     }
     for (size_t i = 0; i < map_.ammoBoxes.size(); i++) {
         if (ammoBoxOpened_[i]) continue;
@@ -760,6 +774,8 @@ void GameClient::renderItems() {
         if ((p - cp).lenXZ() > 100) continue;
         drawBox(p + si::Vec3{0, 0.25f, 0}, {0.45f, 0.25f, 0.28f}, Basis(), Color{90, 110, 80, 255});
         drawBox(p + si::Vec3{0, 0.51f, 0}, {0.46f, 0.02f, 0.29f}, Basis(), Color{200, 190, 90, 255});
+        drawBox(p + si::Vec3{0, 0.3f, 0.285f}, {0.3f, 0.08f, 0.01f}, Basis(), Color{220, 210, 120, 255});
+        for (int k = -1; k <= 1; k += 2) drawBox(p + si::Vec3{0.47f * k, 0.3f, 0}, {0.02f, 0.05f, 0.12f}, Basis(), Color{50, 60, 45, 255});
     }
     // Floor items
     for (auto& [id, it] : items_) {
@@ -839,21 +855,49 @@ void GameClient::renderBus() {
     si::Vec3 p = lerp3(g_.busStart, g_.busEnd, clampf(g_.busProgress, 0, 1));
     si::Vec3 dir = (g_.busEnd - g_.busStart).norm();
     Basis b = yawBasis(yawFromDir(dir));
-    // Airship: tapered envelope, gondola, fins and propellers (original design)
-    Color env{70, 130, 220, 255}, stripe{245, 245, 250, 255};
-    for (int i = -3; i <= 3; i++) {
-        float r = 3.4f - std::fabs((float)i) * 0.5f;
-        drawBox(p + b.f * (i * 2.4f) + si::Vec3{0, 6, 0}, {r, r * 0.9f, 1.25f}, b, i % 2 ? env : Color{80, 145, 235, 255});
+    // Airship (original design): rounded envelope, striped band, gondola with windows,
+    // four tail fins and two engine pods with spinning propellers.
+    Color env{70, 130, 220, 255}, env2{84, 146, 234, 255}, stripe{245, 245, 250, 255}, trim{230, 200, 90, 255};
+    si::Vec3 c = p + si::Vec3{0, 6, 0};
+    const int N = 13;
+    for (int i = 0; i < N; i++) {
+        float t = (i - (N - 1) / 2.0f) / ((N - 1) / 2.0f);   // -1..1 along the length
+        float r = 3.6f * std::sqrt(std::max(0.05f, 1.0f - t * t));
+        si::Vec3 slice = c + b.f * (t * 9.5f);
+        drawBox(slice, {r, r * 0.92f, 0.76f}, b, i % 2 ? env : env2);
+        drawBox(slice, {r * 0.72f, r * 0.98f, 0.77f}, b, i % 2 ? env : env2); // rounder profile
+        if (r > 1.5f) drawBox(slice, {r + 0.02f, 0.3f, 0.77f}, b, stripe);
     }
-    drawBox(p + si::Vec3{0, 6, 0}, {3.45f, 0.35f, 7.5f}, b, stripe);
-    drawBox(p + si::Vec3{0, 1.6f, 0}, {1.6f, 1.2f, 4.2f}, b, Color{230, 200, 90, 255});
-    drawBox(p + si::Vec3{0, 1.9f, 0} + b.f * 1.0f, {1.62f, 0.4f, 2.0f}, b, Color{160, 220, 250, 255});
-    drawBox(p + si::Vec3{0, 6, 0} - b.f * 8.5f, {0.2f, 2.4f, 1.2f}, b, Color{230, 80, 60, 255});
-    drawBox(p + si::Vec3{0, 6, 0} - b.f * 8.5f, {2.4f, 0.2f, 1.2f}, b, Color{230, 80, 60, 255});
-    for (int s = -1; s <= 1; s += 2) {
-        si::Vec3 hub = p + b.r * (2.4f * s) + si::Vec3{0, 1.8f, 0} - b.f * 3.0f;
-        Basis pb = compose(b, compose(Basis{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}, Basis{{std::cos(time_ * 20), std::sin(time_ * 20), 0}, {-std::sin(time_ * 20), std::cos(time_ * 20), 0}, {0, 0, 1}}));
-        drawBox(hub, {1.2f, 0.12f, 0.05f}, pb, Color{50, 50, 55, 255});
+    // Nose cap and tail cone
+    drawBox(c + b.f * 10.2f, {0.9f, 0.8f, 0.4f}, b, trim);
+    drawBox(c - b.f * 10.1f, {0.6f, 0.55f, 0.4f}, b, trim);
+    // Tail fins
+    Color fin{230, 80, 60, 255};
+    drawBox(c - b.f * 8.3f + b.u * 2.6f, {0.12f, 1.5f, 1.4f}, b, fin);
+    drawBox(c - b.f * 8.3f - b.u * 2.6f, {0.12f, 1.5f, 1.4f}, b, fin);
+    drawBox(c - b.f * 8.3f + b.r * 2.6f, {1.5f, 0.12f, 1.4f}, b, fin);
+    drawBox(c - b.f * 8.3f - b.r * 2.6f, {1.5f, 0.12f, 1.4f}, b, fin);
+    // Gondola with windows and a railing deck
+    si::Vec3 g = p + si::Vec3{0, 1.7f, 0};
+    drawBox(g, {1.6f, 1.1f, 4.4f}, b, trim);
+    drawBox(g - b.u * 1.15f, {1.7f, 0.1f, 4.6f}, b, darker4(trim));
+    for (int k = -3; k <= 3; k++) {
+        for (int sd = -1; sd <= 1; sd += 2) drawBox(g + b.r * (1.61f * sd) + b.u * 0.25f + b.f * (k * 1.15f), {0.02f, 0.35f, 0.4f}, b, Color{150, 215, 250, 255});
+    }
+    drawBox(g + b.f * 4.41f + b.u * 0.25f, {1.2f, 0.4f, 0.02f}, b, Color{150, 215, 250, 255});
+    // Struts connecting gondola to envelope
+    for (int sd = -1; sd <= 1; sd += 2)
+        for (int k = -1; k <= 1; k += 2) drawBox(p + si::Vec3{0, 3.4f, 0} + b.r * (1.2f * sd) + b.f * (2.8f * k), {0.06f, 0.7f, 0.06f}, b, Color{80, 80, 90, 255});
+    // Engine pods + propellers
+    for (int sd = -1; sd <= 1; sd += 2) {
+        si::Vec3 pod = p + b.r * (2.9f * sd) + si::Vec3{0, 2.0f, 0} - b.f * 2.4f;
+        drawBox(pod, {0.45f, 0.45f, 1.0f}, b, Color{200, 205, 215, 255});
+        drawBox(pod + b.r * (-1.2f * sd), {0.8f, 0.08f, 0.2f}, b, Color{80, 80, 90, 255});
+        float ang = time_ * 22.0f;
+        Basis pb = compose(b, Basis{{std::cos(ang), std::sin(ang), 0}, {-std::sin(ang), std::cos(ang), 0}, {0, 0, 1}});
+        drawBox(pod - b.f * 1.1f, {1.3f, 0.12f, 0.04f}, pb, Color{45, 45, 50, 255});
+        drawBox(pod - b.f * 1.1f, {0.12f, 1.3f, 0.04f}, pb, Color{45, 45, 50, 255});
+        drawBox(pod - b.f * 1.15f, {0.18f, 0.18f, 0.1f}, b, trim);
     }
 }
 

@@ -120,7 +120,10 @@ static void quad(const si::Vec3& a, const si::Vec3& b, const si::Vec3& c, const 
     rlVertex3f(d.x, d.y, d.z);
 }
 
-void drawBox(const si::Vec3& c, const si::Vec3& h, const Basis& b, Color col) {
+void drawBox(const si::Vec3& c, const si::Vec3& h, const Basis& b0, Color col) {
+    // Winding assumes a right-handed basis; yaw bases are left-handed, so mirror r (the box is symmetric).
+    Basis b = b0;
+    if (b0.r.cross(b0.u).dot(b0.f) < 0) b.r = b0.r * -1.0f;
     si::Vec3 R = b.r * h.x, U = b.u * h.y, F = b.f * h.z;
     si::Vec3 p[8] = {c - R - U - F, c + R - U - F, c + R + U - F, c - R + U - F,
                      c - R - U + F, c + R - U + F, c + R + U + F, c - R + U + F};
@@ -232,7 +235,9 @@ struct MeshBuilder {
             idx.insert(idx.end(), {j0, j2, j1});
         }
     }
-    void box(const si::Vec3& c, const si::Vec3& h, const Basis& b, Color col) {
+    void box(const si::Vec3& c, const si::Vec3& h, const Basis& b0, Color col) {
+        Basis b = b0;
+        if (b0.r.cross(b0.u).dot(b0.f) < 0) b.r = b0.r * -1.0f;
         si::Vec3 R = b.r * h.x, U = b.u * h.y, F = b.f * h.z;
         si::Vec3 p[8] = {c - R - U - F, c + R - U - F, c + R + U - F, c - R + U - F,
                          c - R - U + F, c + R - U + F, c + R + U + F, c - R + U + F};
@@ -246,6 +251,18 @@ struct MeshBuilder {
         quad(p[0], p[4], p[7], p[3], b.r * -1.0f, side);
     }
     void aabb(const AABB& bb, Color col) { box(bb.center(), bb.size() * 0.5f, Basis(), col); }
+    // N-sided cone (used for pine tiers)
+    void cone(const si::Vec3& base, float radius, float h, int sides, Color col, float rot = 0) {
+        si::Vec3 apex = base + si::Vec3{0, h, 0};
+        for (int i = 0; i < sides; i++) {
+            float a0 = rot + i * 2 * kPi / sides, a1 = rot + (i + 1) * 2 * kPi / sides;
+            si::Vec3 p0 = base + si::Vec3{std::cos(a0) * radius, 0, std::sin(a0) * radius};
+            si::Vec3 p1 = base + si::Vec3{std::cos(a1) * radius, 0, std::sin(a1) * radius};
+            Color c = shade4(col, 0.9f + 0.2f * (0.5f + 0.5f * std::cos(a0 + 0.8f)));
+            tri(p1, p0, apex, c);
+            tri(p0, p1, base, shade4(col, 0.6f));
+        }
+    }
     void pyramid(const si::Vec3& base, float halfW, float h, Color col) {
         si::Vec3 apex = base + si::Vec3{0, h, 0};
         si::Vec3 c0 = base + si::Vec3{-halfW, 0, -halfW}, c1 = base + si::Vec3{halfW, 0, -halfW};
@@ -288,47 +305,97 @@ void addDecor(MeshBuilder& mb, const Decor& d) {
     Color c = C(d.color);
     float s = d.scale;
     si::Vec3 p = d.pos;
+    float rot = (float)(((int)(p.x * 7.3f + p.z * 3.1f)) % 628) / 100.0f; // stable per-object variation
+    auto sh = MeshBuilder::shade4;
     switch (d.kind) {
         case DecorKind::PineTree:
-        case DecorKind::SnowPine:
-            mb.pyramid(p + si::Vec3{0, -0.5f * s, 0}, 2.6f * s, 3.6f * s, c);
-            mb.pyramid(p + si::Vec3{0, 1.8f * s, 0}, 2.0f * s, 3.0f * s, MeshBuilder::shade4(c, 1.08f));
-            mb.pyramid(p + si::Vec3{0, 3.7f * s, 0}, 1.3f * s, 2.6f * s, MeshBuilder::shade4(c, 1.15f));
+        case DecorKind::SnowPine: {
+            Color snow{235, 240, 245, 255};
+            float y = -0.8f * s;
+            float r = 2.8f * s;
+            for (int i = 0; i < 4; i++) {
+                Color tier = sh(c, 0.92f + i * 0.06f);
+                mb.cone(p + si::Vec3{0, y, 0}, r, 2.7f * s, 8, tier, rot + i * 0.4f);
+                if (d.kind == DecorKind::SnowPine) mb.cone(p + si::Vec3{0, y + 1.7f * s, 0}, r * 0.38f, 1.0f * s, 8, snow, rot);
+                y += 1.45f * s;
+                r *= 0.74f;
+            }
             break;
-        case DecorKind::OakTree:
-            mb.box(p + si::Vec3{0, 1.5f * s, 0}, si::Vec3{2.2f, 1.6f, 2.2f} * s, Basis(), c);
-            mb.box(p + si::Vec3{0.8f * s, 2.8f * s, 0.4f * s}, si::Vec3{1.4f, 1.1f, 1.4f} * s, yawBasis(0.6f), MeshBuilder::shade4(c, 1.1f));
-            mb.box(p + si::Vec3{-0.9f * s, 2.4f * s, -0.6f * s}, si::Vec3{1.2f, 1.0f, 1.2f} * s, yawBasis(1.1f), MeshBuilder::shade4(c, 0.92f));
+        }
+        case DecorKind::OakTree: {
+            const float off[7][4] = {{0, 1.6f, 0, 2.0f}, {1.3f, 1.3f, 0.4f, 1.3f}, {-1.2f, 1.2f, -0.5f, 1.3f}, {0.3f, 1.2f, 1.3f, 1.2f},
+                                     {-0.4f, 1.3f, -1.3f, 1.2f}, {0.2f, 2.9f, 0.1f, 1.3f}, {0.9f, 2.4f, -0.8f, 1.0f}};
+            for (int i = 0; i < 7; i++) {
+                float k = off[i][3] * s;
+                mb.box(p + si::Vec3{off[i][0], off[i][1], off[i][2]} * s, {k, k * 0.8f, k}, yawBasis(rot + i), sh(c, 0.88f + (i % 3) * 0.08f));
+            }
+            // A couple of branches poking out of the trunk
+            mb.box(p + si::Vec3{0.6f * s, 0.2f, 0}, si::Vec3{0.6f, 0.08f, 0.08f} * s, compose(yawBasis(rot), yawPitchBasis(0, 0.5f)), Color{95, 68, 44, 255});
             break;
+        }
         case DecorKind::JungleTree:
-            mb.box(p + si::Vec3{0, 0.8f * s, 0}, si::Vec3{3.6f, 1.0f, 3.6f} * s, yawBasis(0.3f), c);
-            mb.box(p + si::Vec3{0, 2.0f * s, 0}, si::Vec3{2.4f, 0.9f, 2.4f} * s, yawBasis(1.0f), MeshBuilder::shade4(c, 1.12f));
+            mb.box(p + si::Vec3{0, 0.8f * s, 0}, si::Vec3{3.6f, 0.9f, 3.6f} * s, yawBasis(rot), c);
+            mb.box(p + si::Vec3{0.5f * s, 1.9f * s, -0.3f * s}, si::Vec3{2.6f, 0.8f, 2.6f} * s, yawBasis(rot + 0.7f), sh(c, 1.12f));
+            mb.box(p + si::Vec3{-0.3f * s, 2.8f * s, 0.2f * s}, si::Vec3{1.5f, 0.6f, 1.5f} * s, yawBasis(rot + 1.3f), sh(c, 1.2f));
+            for (int i = 0; i < 5; i++) { // hanging vines
+                float a = rot + i * 1.26f;
+                si::Vec3 v = p + si::Vec3{std::cos(a) * 3.0f * s, -0.9f * s, std::sin(a) * 3.0f * s};
+                mb.box(v, si::Vec3{0.06f, 1.0f + (i % 3) * 0.4f, 0.06f} * s, Basis(), sh(c, 0.8f));
+            }
             break;
         case DecorKind::PalmTree:
-            for (int i = 0; i < 5; i++) {
-                float a = i * 2 * kPi / 5 + (d.pos.x * 0.1f);
-                Basis b = compose(yawBasis(a), yawPitchBasis(0, -0.35f));
-                si::Vec3 dir = b.f;
-                mb.box(p + dir * (1.4f * s), si::Vec3{0.5f, 0.08f, 1.5f} * s, b, c);
+            for (int i = 0; i < 7; i++) {
+                float a = i * 2 * kPi / 7 + rot;
+                Basis b1 = compose(yawBasis(a), yawPitchBasis(0, -0.15f));
+                Basis b2 = compose(yawBasis(a), yawPitchBasis(0, -0.75f));
+                mb.box(p + b1.f * (1.0f * s), si::Vec3{0.45f, 0.06f, 1.05f} * s, b1, c);
+                mb.box(p + b1.f * (2.0f * s) + b2.f * (0.8f * s), si::Vec3{0.35f, 0.05f, 0.85f} * s, b2, sh(c, 0.88f));
             }
-            mb.box(p, si::Vec3{0.35f, 0.3f, 0.35f} * s, Basis(), Color{110, 80, 50, 255});
+            for (int i = 0; i < 3; i++) {
+                float a = rot + i * 2.1f;
+                mb.box(p + si::Vec3{std::cos(a) * 0.35f, -0.35f, std::sin(a) * 0.35f} * s, si::Vec3{0.18f, 0.18f, 0.18f} * s, Basis(), Color{110, 80, 45, 255});
+            }
             break;
-        case DecorKind::Bush: mb.box(p + si::Vec3{0, 0.45f * s, 0}, si::Vec3{0.8f, 0.5f, 0.8f} * s, yawBasis(p.x), c); break;
+        case DecorKind::Bush:
+            mb.box(p + si::Vec3{0, 0.45f * s, 0}, si::Vec3{0.75f, 0.5f, 0.75f} * s, yawBasis(rot), c);
+            mb.box(p + si::Vec3{0.55f * s, 0.35f * s, 0.2f * s}, si::Vec3{0.5f, 0.38f, 0.5f} * s, yawBasis(rot + 0.8f), sh(c, 1.1f));
+            mb.box(p + si::Vec3{-0.45f * s, 0.32f * s, -0.3f * s}, si::Vec3{0.45f, 0.35f, 0.45f} * s, yawBasis(rot + 1.7f), sh(c, 0.9f));
+            mb.box(p + si::Vec3{0.1f * s, 0.85f * s, -0.1f * s}, si::Vec3{0.4f, 0.28f, 0.4f} * s, yawBasis(rot + 2.3f), sh(c, 1.18f));
+            break;
         case DecorKind::Flower:
-            mb.box(p + si::Vec3{0, 0.2f, 0}, {0.04f, 0.2f, 0.04f}, Basis(), Color{60, 130, 50, 255});
-            mb.box(p + si::Vec3{0, 0.42f, 0}, {0.15f, 0.08f, 0.15f}, Basis(), c);
+            mb.box(p + si::Vec3{0, 0.2f, 0}, {0.03f, 0.2f, 0.03f}, Basis(), Color{60, 130, 50, 255});
+            mb.box(p + si::Vec3{0.06f, 0.12f, 0}, {0.07f, 0.015f, 0.03f}, yawBasis(rot), Color{70, 150, 60, 255});
+            for (int i = 0; i < 4; i++) {
+                float a = rot + i * kPi / 2;
+                mb.box(p + si::Vec3{std::cos(a) * 0.09f, 0.42f, std::sin(a) * 0.09f}, {0.07f, 0.02f, 0.07f}, yawBasis(a), c);
+            }
+            mb.box(p + si::Vec3{0, 0.44f, 0}, {0.05f, 0.03f, 0.05f}, Basis(), Color{250, 220, 70, 255});
             break;
-        case DecorKind::Crop: mb.box(p + si::Vec3{0, 0.6f * s, 0}, si::Vec3{0.12f, 0.6f, 0.12f} * s, Basis(), c); break;
-        case DecorKind::Lamp: mb.box(p + si::Vec3{0, 0.3f, 0}, {0.35f, 0.4f, 0.35f}, Basis(), Color{255, 170, 80, 255}); break;
+        case DecorKind::Crop:
+            mb.box(p + si::Vec3{0, 0.6f * s, 0}, si::Vec3{0.08f, 0.6f, 0.08f} * s, Basis(), sh(c, 0.8f));
+            mb.box(p + si::Vec3{0, 1.1f * s, 0}, si::Vec3{0.12f, 0.2f, 0.12f} * s, yawBasis(rot), c);
+            mb.box(p + si::Vec3{0.1f, 0.6f * s, 0}, si::Vec3{0.15f, 0.03f, 0.05f} * s, yawBasis(rot), Color{90, 150, 60, 255});
+            break;
+        case DecorKind::Lamp:
+            mb.box(p + si::Vec3{0, 0.3f, 0}, {0.3f, 0.35f, 0.3f}, Basis(), Color{255, 170, 80, 255});
+            mb.box(p + si::Vec3{0, 0.7f, 0}, {0.38f, 0.05f, 0.38f}, Basis(), Color{60, 40, 30, 255});
+            mb.box(p + si::Vec3{0, -0.08f, 0}, {0.34f, 0.04f, 0.34f}, Basis(), Color{60, 40, 30, 255});
+            break;
         case DecorKind::Cactus:
             mb.box(p + si::Vec3{0.6f * s, -1.2f * s, 0}, si::Vec3{0.45f, 0.15f, 0.2f} * s, Basis(), c);
             mb.box(p + si::Vec3{0.95f * s, -0.7f * s, 0}, si::Vec3{0.18f, 0.55f, 0.18f} * s, Basis(), c);
             mb.box(p + si::Vec3{-0.55f * s, -1.8f * s, 0}, si::Vec3{0.4f, 0.14f, 0.2f} * s, Basis(), c);
             mb.box(p + si::Vec3{-0.85f * s, -1.4f * s, 0}, si::Vec3{0.16f, 0.45f, 0.16f} * s, Basis(), c);
+            mb.box(p + si::Vec3{0, 0.08f * s, 0}, si::Vec3{0.2f, 0.1f, 0.2f} * s, Basis(), Color{240, 110, 150, 255}); // bloom
             break;
         case DecorKind::DeadTree:
-            mb.box(p + si::Vec3{0.6f * s, -0.8f * s, 0}, si::Vec3{0.8f, 0.1f, 0.1f} * s, yawBasis(0.5f), c);
-            mb.box(p + si::Vec3{-0.5f * s, -1.6f * s, 0.2f}, si::Vec3{0.7f, 0.1f, 0.1f} * s, yawBasis(2.3f), c);
+            mb.box(p + si::Vec3{0.6f * s, -0.8f * s, 0}, si::Vec3{0.8f, 0.1f, 0.1f} * s, compose(yawBasis(0.5f + rot), yawPitchBasis(0, 0.4f)), c);
+            mb.box(p + si::Vec3{-0.5f * s, -1.6f * s, 0.2f}, si::Vec3{0.7f, 0.1f, 0.1f} * s, compose(yawBasis(2.3f + rot), yawPitchBasis(0, 0.3f)), c);
+            mb.box(p + si::Vec3{0.2f * s, 0.1f * s, -0.3f}, si::Vec3{0.5f, 0.07f, 0.07f} * s, compose(yawBasis(4.0f + rot), yawPitchBasis(0, 0.6f)), c);
+            break;
+        case DecorKind::Glass:
+        case DecorKind::Trim:
+            mb.box(p, d.size, Basis(), c);
             break;
         default: break;
     }

@@ -139,6 +139,13 @@ bool checkbox(Rectangle r, bool& value, const std::string& label) {
     return false;
 }
 
+bool setMouseCaptured(bool captured) {
+    if (captured == IsCursorHidden()) return false;
+    if (captured) DisableCursor();
+    else EnableCursor();
+    return true;
+}
+
 void clearFocus() { gFocus = -1; }
 int focused() { return gFocus; }
 

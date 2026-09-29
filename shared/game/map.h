@@ -42,7 +42,7 @@ struct Vent {
     float radius = 3.0f;
 };
 
-enum class DecorKind : uint8_t { PineTree = 0, OakTree, PalmTree, JungleTree, Bush, Cactus, Flower, Lamp, Crop, SnowPine, DeadTree, Count };
+enum class DecorKind : uint8_t { PineTree = 0, OakTree, PalmTree, JungleTree, Bush, Cactus, Flower, Lamp, Crop, SnowPine, DeadTree, Glass, Trim, Count };
 
 struct Decor {
     DecorKind kind;
@@ -50,6 +50,7 @@ struct Decor {
     float scale = 1.0f;
     uint32_t linkedShape = INVALID_ID; // disappears when this shape is destroyed
     Color4 color;
+    Vec3 size;                         // half extents for Glass / Trim boxes
 };
 
 struct Road { Vec2 a, b; float width; };
@@ -122,6 +123,7 @@ private:
     void addChest(const Vec3& p, float yaw = 0);
     void addLoot(const Vec3& p);
     void addTree(DecorKind k, float x, float z, float scale);
+    void addBoxDecor(DecorKind k, const AABB& b, Color4 c, uint32_t link);
 
     void buildPoi(POI& p);
 };

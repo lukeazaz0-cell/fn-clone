@@ -265,7 +265,7 @@ void App::leaveMatch() {
     net_.disconnect();
     game_.reset();
     stopOffline();
-    EnableCursor();
+    ui::setMouseCaptured(false);
     screen_ = Screen::Lobby;
     refreshProfile();
     saveSettings();
