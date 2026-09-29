@@ -145,6 +145,9 @@ struct Projectile {
     Vec3 pos, vel;
     float fuse;
     bool alive = true;
+    bool stuck = false;
+    uint16_t stuckTo = 0xFFFF;  // player a sticky charge is attached to
+    si::Vec3 stuckOffset;
 };
 
 struct SupplyDrop {

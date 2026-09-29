@@ -31,6 +31,12 @@ struct WeaponStats {
     float adsZoom = 1.3f;
     float equipTime = 0.4f;
     float spinUp = 0.0f;       // minigun
+    // Projectile behaviour (rockets, grenades, bolts)
+    float projectileGravity = 0.0f; // fraction of GRAVITY
+    float fuse = 8.0f;              // seconds until it detonates / expires
+    bool explodeOnImpact = false;   // rockets
+    bool bounce = false;            // grenades
+    bool stick = false;             // sticky charges and bolts
 };
 
 struct ConsumableStats {

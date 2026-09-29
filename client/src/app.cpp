@@ -31,6 +31,7 @@ void App::loadSettings() {
     settings_.viewDistance = j.value("view_distance", settings_.viewDistance);
     settings_.showFps = j.value("show_fps", settings_.showFps);
     settings_.invertY = j.value("invert_y", settings_.invertY);
+    settings_.shadows = j.value("shadows", settings_.shadows);
     settings_.backendUrl = j.value("backend_url", settings_.backendUrl);
     settings_.lastUser = j.value("last_user", settings_.lastUser);
     api_.token = j.value("token", std::string());
@@ -53,7 +54,7 @@ void App::saveSettings() {
     json emotes = json::array();
     for (auto& e : offlineLoadout_.emotes) emotes.push_back(e);
     json j = {{"sensitivity", settings_.sensitivity}, {"fov", settings_.fov}, {"volume", settings_.volume},
-              {"view_distance", settings_.viewDistance}, {"show_fps", settings_.showFps}, {"invert_y", settings_.invertY},
+              {"view_distance", settings_.viewDistance}, {"show_fps", settings_.showFps}, {"invert_y", settings_.invertY}, {"shadows", settings_.shadows},
               {"backend_url", settings_.backendUrl}, {"last_user", settings_.lastUser}, {"token", offline_ ? "" : api_.token},
               {"offline_bots", offlineBots_}, {"offline_difficulty", offlineDiff_}, {"direct_host", directHost_},
               {"offline_loadout", {{"outfit", offlineLoadout_.outfit}, {"backbling", offlineLoadout_.backbling}, {"pickaxe", offlineLoadout_.pickaxe},
@@ -276,6 +277,7 @@ void App::run() {
     InitWindow(1600, 900, "Storm Island");
     SetExitKey(KEY_NULL);
     SetWindowMinSize(960, 540);
+    ui::loadFonts();
     loadSettings();
     api_.baseUrl = settings_.backendUrl;
     user_ = settings_.lastUser;
@@ -338,6 +340,7 @@ void App::run() {
     previewRT_ = {};
     previewLight_.unload();
     audio_.shutdown();
+    ui::unloadFonts();
     CloseWindow();
 }
 

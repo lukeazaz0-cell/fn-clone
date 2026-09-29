@@ -313,6 +313,91 @@ void GameMap::wallRun(bool alongX, float fixed, float from, float to, float y0, 
     }
 }
 
+void GameMap::addProp(DecorKind k, float x, float z, float yaw, Color4 c, uint32_t link) {
+    Decor d;
+    d.kind = k;
+    d.pos = {x, heightAt(x, z), z};
+    d.yaw = yaw;
+    d.color = c;
+    d.linkedShape = link;
+    decor.push_back(d);
+}
+
+// Barrels collide as a box (style 9 = not drawn as a box) and render as a decor prism.
+void GameMap::barrel(float x, float z, Color4 c) {
+    float y = heightAt(x, z);
+    uint32_t id = box({x - 0.35f, y, z - 0.35f}, {x + 0.35f, y + 1.1f, z + 0.35f}, Material::Metal, c, 120, true, 9);
+    addProp(DecorKind::Barrel, x, z, 0, c, id);
+}
+
+void GameMap::crate(float x, float z, float sz) {
+    float y = heightAt(x, z);
+    uint32_t id = box({x - sz / 2, y - 0.05f, z - sz / 2}, {x + sz / 2, y + sz, z + sz / 2}, Material::Wood, rgb(170, 125, 75), 90, true, 0);
+    Decor d;
+    d.kind = DecorKind::Crate;
+    d.pos = {x, y, z};
+    d.size = {sz / 2, sz / 2, sz / 2};
+    d.color = rgb(120, 85, 50);
+    d.linkedShape = id;
+    decor.push_back(d);
+}
+
+void GameMap::propCluster(float cx, float cz, float radius, int count) {
+    Color4 barrelColors[] = {rgb(190, 60, 40), rgb(50, 110, 170), rgb(70, 130, 70), rgb(200, 160, 50)};
+    for (int i = 0; i < count; i++) {
+        float a = rng_.range(0, 2 * kPi), d = rng_.range(0, radius);
+        float x = cx + std::cos(a) * d, z = cz + std::sin(a) * d;
+        if (!isLand(x, z)) continue;
+        if (rng_.chance(0.5f)) barrel(x, z, barrelColors[rng_.irange(0, 3)]);
+        else crate(x, z, rng_.range(0.8f, 1.3f));
+    }
+}
+
+void GameMap::genStreetProps() {
+    // Street lamps and dashed centre lines along every road
+    for (auto& rd : roads) {
+        Vec2 d = rd.b - rd.a;
+        float len = d.len();
+        if (len < 1) continue;
+        Vec2 dir = d * (1.0f / len);
+        Vec2 side{-dir.y, dir.x};
+        float yaw = std::atan2(dir.x, dir.y);
+        for (float t = 3; t < len; t += 7.0f) {
+            Vec2 p = rd.a + dir * t;
+            if (!isLand(p.x, p.y)) continue;
+            Decor l;
+            l.kind = DecorKind::RoadLine;
+            l.pos = {p.x, heightAt(p.x, p.y) + 0.03f, p.y};
+            l.yaw = yaw;
+            l.size = {0.08f, 0.02f, 1.3f};
+            l.color = rgb(235, 225, 170);
+            decor.push_back(l);
+        }
+        for (float t = 25; t < len - 10; t += 55.0f) {
+            Vec2 p = rd.a + dir * t + side * 5.2f;
+            if (!isLand(p.x, p.y)) continue;
+            addProp(DecorKind::StreetLamp, p.x, p.y, yaw, rgb(70, 72, 80));
+        }
+    }
+    // Town furniture near every named location
+    for (auto& p : pois) {
+        if (!p.major) continue;
+        int n = (int)(p.radius / 8);
+        for (int i = 0; i < n; i++) {
+            float a = rng_.range(0, 2 * kPi), d = rng_.range(0.3f, 0.95f) * p.radius;
+            float x = p.center.x + std::cos(a) * d, z = p.center.y + std::sin(a) * d;
+            if (!isLand(x, z)) continue;
+            int kind = rng_.irange(0, 2);
+            if (kind == 0) addProp(DecorKind::Bench, x, z, a + kPi / 2, rgb(130, 90, 55));
+            else if (kind == 1) addProp(DecorKind::Hydrant, x, z, a, rgb(210, 50, 40));
+            else addProp(DecorKind::Mailbox, x, z, a, rgb(60, 90, 170));
+        }
+        if (p.type == PoiType::Industrial || p.type == PoiType::Junkyard || p.type == PoiType::Farm || p.type == PoiType::PirateCove ||
+            p.type == PoiType::Mines || p.type == PoiType::Airfield)
+            propCluster(p.center.x + rng_.range(-15, 15), p.center.y + rng_.range(-15, 15), 14, 10);
+    }
+}
+
 void GameMap::addBoxDecor(DecorKind k, const AABB& b, Color4 c, uint32_t link) {
     Decor d;
     d.kind = k;
@@ -361,6 +446,17 @@ float GameMap::house(float cx, float cz, float w, float d, int floors, Material 
             float fx = x0 + 1.0f, fz = cz + rng_.range(-1, 1);
             box({fx, y, fz - 1.0f}, {fx + 0.9f, y + 0.8f, fz + 1.0f}, Material::Wood, rgb(140, 60, 60), 60);
         }
+        if (!ground && w > 7 && rng_.chance(0.8f)) {
+            // Bed with pillow and a wardrobe
+            float bx = x0 + 1.4f, bz = z1 - 1.6f;
+            box({bx - 0.9f, y, bz - 1.1f}, {bx + 0.9f, y + 0.55f, bz + 1.1f}, Material::Wood, rgb(90, 110, 170), 60);
+            box({bx - 0.8f, y + 0.55f, bz + 0.5f}, {bx + 0.8f, y + 0.7f, bz + 1.0f}, Material::Wood, rgb(235, 235, 230), 30);
+            box({x1 - 3.2f, y, z1 - 0.8f}, {x1 - 2.0f, y + 2.0f, z1 - 0.2f}, Material::Wood, rgb(110, 75, 45), 60);
+        }
+        if (ground && rng_.chance(0.5f)) {
+            // Kitchen counter along the back wall
+            box({cx - 1.5f, y, z1 - 0.8f}, {cx + 0.5f, y + 0.95f, z1 - 0.2f}, Material::Wood, rgb(200, 195, 185), 60);
+        }
         if (ground && d > 7 && rng_.chance(0.6f)) {
             float tx = cx - 1.0f, tz = cz + d * 0.15f;
             box({tx - 0.6f, y + 0.7f, tz - 0.6f}, {tx + 0.6f, y + 0.8f, tz + 0.6f}, Material::Wood, rgb(120, 85, 50), 40);
@@ -368,6 +464,8 @@ float GameMap::house(float cx, float cz, float w, float d, int floors, Material 
         }
     }
     float top = base + floors * fh;
+    // Mailbox by the front door
+    if (loot && rng_.chance(0.5f)) addProp(DecorKind::Mailbox, cx + 2.5f, z0 - 1.6f, 0, rgb(rng_.irange(40, 200), 60, 60));
     // Roof / attic
     if (roofStyle == 1) {
         float rh = std::min(3.2f, d * 0.35f);
@@ -1165,7 +1263,15 @@ void GameMap::genNature() {
             } else if (roll < density + 0.03f && !inTown) {
                 Color4 rc = b == Biome::Snow ? rgb(200, 205, 215) : b == Biome::Desert ? rgb(190, 140, 100) : b == Biome::Volcanic ? rgb(60, 55, 55) : rgb(130, 130, 125);
                 rock(px, pz, rng_.range(1.2f, 3.5f), jitter(rng_, rc, 0.08f));
-            } else if (roll < density + 0.12f && b != Biome::Desert && b != Biome::Volcanic && b != Biome::Beach) {
+            } else if (roll < density + 0.45f && (b == Biome::Grass || b == Biome::Forest || b == Biome::Jungle || b == Biome::Farm) && !inTown) {
+                Decor d;
+                d.kind = DecorKind::GrassTuft;
+                d.pos = {px, h, pz};
+                d.scale = rng_.range(0.7f, 1.4f);
+                d.yaw = rng_.range(0, 2 * kPi);
+                d.color = b == Biome::Jungle ? rgb(60, 140, 55) : rgb(95, 155, 65);
+                decor.push_back(d);
+            } else if (roll < density + 0.57f && b != Biome::Desert && b != Biome::Volcanic && b != Biome::Beach) {
                 Decor d;
                 d.kind = rng_.chance(0.7f) ? DecorKind::Bush : DecorKind::Flower;
                 d.pos = {px, h, pz};
@@ -1218,6 +1324,7 @@ void GameMap::generate(uint32_t s) {
     genPois();
     genBiomes(); // refresh after flattening
     genNature();
+    genStreetProps();
     genSlipstreams();
     const POI* c = nullptr;
     for (auto& p : pois) if (p.type == PoiType::FutureCity) c = &p;

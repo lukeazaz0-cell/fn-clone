@@ -1,5 +1,7 @@
 #include "ui.h"
 
+#include "font_data.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -29,16 +31,44 @@ void beginFrame() {
 float scale() { return gScale; }
 int px(float v) { return (int)std::round(v * gScale); }
 
-static Font font() { return GetFontDefault(); }
+static Font gBold{}, gSemi{};
+static bool gFontsLoaded = false;
+
+void loadFonts() {
+    gBold = LoadFontFromMemory(".ttf", kFontBold, (int)kFontBoldSize, 72, nullptr, 0);
+    gSemi = LoadFontFromMemory(".ttf", kFontSemiBold, (int)kFontSemiBoldSize, 48, nullptr, 0);
+    GenTextureMipmaps(&gBold.texture);
+    GenTextureMipmaps(&gSemi.texture);
+    SetTextureFilter(gBold.texture, TEXTURE_FILTER_TRILINEAR);
+    SetTextureFilter(gSemi.texture, TEXTURE_FILTER_TRILINEAR);
+    gFontsLoaded = gBold.texture.id != 0 && gSemi.texture.id != 0;
+}
+
+void unloadFonts() {
+    if (!gFontsLoaded) return;
+    UnloadFont(gBold);
+    UnloadFont(gSemi);
+    gFontsLoaded = false;
+}
+
+// Font sizes below were tuned for raylib's small bitmap font; Titillium renders
+// visually smaller at the same pixel size, so scale it up a bit.
+static Font fontFor(float sz) {
+    if (!gFontsLoaded) return GetFontDefault();
+    return sz >= 22.0f ? gBold : gSemi;
+}
+static float sizeFor(float size) { return size * gScale * (gFontsLoaded ? 1.18f : 1.0f); }
 
 float textWidth(const std::string& s, float size) {
-    float sz = size * gScale;
-    return MeasureTextEx(font(), s.c_str(), sz, sz / 10.0f).x;
+    float sz = sizeFor(size);
+    return MeasureTextEx(fontFor(size), s.c_str(), sz, gFontsLoaded ? 0.5f : sz / 10.0f).x;
 }
 
 void text(const std::string& s, float x, float y, float size, Color c) {
-    float sz = size * gScale;
-    DrawTextEx(font(), s.c_str(), {x, y}, sz, sz / 10.0f, c);
+    float sz = sizeFor(size);
+    // Keep the visual center where the old font put it
+    float yo = gFontsLoaded ? -sz * 0.08f : 0.0f;
+    DrawTextEx(fontFor(size), s.c_str(), {std::round(x), std::round(y + yo)}, sz, gFontsLoaded ? 0.5f : sz / 10.0f, c);
 }
 
 void textShadow(const std::string& s, float x, float y, float size, Color c) {

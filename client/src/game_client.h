@@ -22,6 +22,7 @@ struct Settings {
     float viewDistance = 650.0f;
     bool showFps = true;
     bool invertY = false;
+    bool shadows = true;
     bool autotest = false;          // scripted run for screenshots/CI (STORM_AUTOTEST)
     std::string backendUrl = "http://127.0.0.1:8080";
     std::string lastUser;
@@ -46,6 +47,7 @@ struct RemotePlayer {
 
 struct ClientItem { uint32_t id; ItemStack stack; si::Vec3 pos; float spawnTime; };
 struct Tracer { si::Vec3 a, b; float t; Color c; };
+struct Flash { si::Vec3 p; float t; };
 struct Blast { si::Vec3 p; float t; float r; };
 struct Particle { si::Vec3 p, v; float t, life; Color c; float size; };
 struct DamageNumber { si::Vec3 p; int amount; uint8_t flags; float t; };
@@ -123,6 +125,8 @@ private:
     bool hitMarkerHead_ = false;
     float damageFlash_ = 0;
     std::vector<Tracer> tracers_;
+    std::vector<Flash> flashes_;
+    float shake_ = 0;
     std::vector<Blast> blasts_;
     std::vector<Particle> particles_;
     std::vector<DamageNumber> dmgNumbers_;

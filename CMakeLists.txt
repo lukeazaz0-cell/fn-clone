@@ -115,6 +115,7 @@ if(STORM_BUILD_CLIENT)
     client/src/net_client.cpp
     client/src/api.cpp
     client/src/render_world.cpp
+    client/src/gfx.cpp
     client/src/render_chars.cpp
     client/src/hud.cpp
     client/src/menus.cpp

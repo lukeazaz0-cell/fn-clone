@@ -45,6 +45,16 @@ std::string shortName(const ItemStack& s) {
         case ItemType::RegenSoda: return "SODA";
         case ItemType::MegaFlask: return "FLASK";
         case ItemType::LaunchPad: return "LAUNCH";
+        case ItemType::HeavyRifle: return "HEAVY AR";
+        case ItemType::CompactSMG: return "C-SMG";
+        case ItemType::DoubleBarrel: return "DOUBLE";
+        case ItemType::HeavyShotgun: return "HEAVY SG";
+        case ItemType::HuntingRifle: return "HUNTING";
+        case ItemType::HandCannon: return "CANNON";
+        case ItemType::GrenadeLauncher: return "GL";
+        case ItemType::Crossbow: return "XBOW";
+        case ItemType::StickyCharge: return "STICKY";
+        case ItemType::FieldKit: return "FIELD KIT";
         default: return "";
     }
 }

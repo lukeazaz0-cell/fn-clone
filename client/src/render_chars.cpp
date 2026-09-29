@@ -116,6 +116,62 @@ void gunModel(const si::Vec3& hand, const Basis& b, ItemType t, Color body, Colo
             part(0, 0.04f, 0.8f, 0.08f, 0.08f, 0.02f, dark);
             part(0, 0.14f, 0.05f, 0.092f, 0.012f, 0.1f, rc);
             break;
+        case ItemType::HeavyRifle:
+            part(0, 0.02f, 0.2f, 0.05f, 0.08f, 0.28f, body);
+            part(0, 0.04f, 0.62f, 0.022f, 0.022f, 0.16f, metal);
+            part(0, 0.04f, 0.8f, 0.03f, 0.03f, 0.03f, dark);              // muzzle brake
+            part(0, -0.13f, 0.22f, 0.035f, 0.1f, 0.05f, metal);
+            part(0, 0.0f, -0.2f, 0.04f, 0.07f, 0.13f, wood);
+            part(0, 0.12f, 0.16f, 0.03f, 0.03f, 0.08f, Color{25, 25, 30, 255});
+            part(0, 0.105f, 0.3f, 0.052f, 0.012f, 0.1f, rc);
+            break;
+        case ItemType::CompactSMG:
+            part(0, 0.02f, 0.06f, 0.04f, 0.065f, 0.13f, body);
+            part(0, 0.03f, 0.24f, 0.03f, 0.03f, 0.07f, dark);              // suppressor
+            part(0, -0.12f, 0.04f, 0.025f, 0.08f, 0.03f, metal);
+            part(0, -0.06f, 0.18f, 0.02f, 0.05f, 0.02f, dark);            // foregrip
+            part(0, 0.09f, 0.06f, 0.042f, 0.012f, 0.07f, rc);
+            break;
+        case ItemType::DoubleBarrel:
+            part(-0.025f, 0.05f, 0.45f, 0.022f, 0.022f, 0.3f, metal);
+            part(0.025f, 0.05f, 0.45f, 0.022f, 0.022f, 0.3f, metal);
+            part(0, 0.02f, 0.1f, 0.05f, 0.05f, 0.1f, metal);
+            part(0, -0.01f, -0.16f, 0.04f, 0.06f, 0.16f, wood);
+            part(0, 0.075f, 0.1f, 0.052f, 0.01f, 0.06f, rc);
+            break;
+        case ItemType::HeavyShotgun:
+            part(0, 0.02f, 0.16f, 0.05f, 0.07f, 0.24f, body);
+            part(0, 0.05f, 0.52f, 0.03f, 0.03f, 0.2f, metal);
+            part(0, -0.13f, 0.18f, 0.035f, 0.08f, 0.06f, dark);            // box mag
+            part(0, -0.01f, -0.2f, 0.035f, 0.06f, 0.12f, dark);
+            part(0, 0.095f, 0.16f, 0.052f, 0.012f, 0.1f, rc);
+            break;
+        case ItemType::HuntingRifle:
+            part(0, 0.02f, 0.25f, 0.035f, 0.05f, 0.35f, wood);
+            part(0, 0.04f, 0.72f, 0.016f, 0.016f, 0.2f, metal);
+            part(0, 0.1f, 0.15f, 0.012f, 0.03f, 0.03f, metal);
+            part(0, 0.0f, -0.2f, 0.035f, 0.065f, 0.14f, wood);
+            part(0, 0.075f, 0.3f, 0.037f, 0.01f, 0.08f, rc);
+            break;
+        case ItemType::HandCannon:
+            part(0, 0.04f, 0.1f, 0.035f, 0.055f, 0.16f, body);
+            part(0, 0.06f, 0.28f, 0.03f, 0.03f, 0.05f, metal);
+            part(0, 0.105f, 0.1f, 0.037f, 0.01f, 0.1f, rc);
+            break;
+        case ItemType::GrenadeLauncher:
+            part(0, 0.03f, 0.2f, 0.06f, 0.06f, 0.3f, body);
+            part(0, 0.03f, 0.08f, 0.085f, 0.085f, 0.08f, metal);          // drum
+            part(0, 0.03f, 0.52f, 0.045f, 0.045f, 0.04f, dark);
+            part(0, 0.0f, -0.18f, 0.035f, 0.06f, 0.12f, dark);
+            part(0, 0.095f, 0.25f, 0.062f, 0.012f, 0.1f, rc);
+            break;
+        case ItemType::Crossbow:
+            part(0, 0.02f, 0.2f, 0.035f, 0.045f, 0.3f, wood);
+            part(0, 0.04f, 0.46f, 0.32f, 0.02f, 0.025f, dark);            // limbs
+            part(0, 0.06f, 0.3f, 0.01f, 0.01f, 0.2f, Color{210, 210, 200, 255}); // bolt
+            part(0, 0.0f, -0.16f, 0.035f, 0.06f, 0.12f, wood);
+            part(0, 0.07f, 0.12f, 0.037f, 0.01f, 0.08f, rc);
+            break;
         default: part(0, 0.02f, 0.2f, 0.05f, 0.08f, 0.3f, body); break;
     }
 }
@@ -279,6 +335,7 @@ void drawCharacter(const CharPose& p, const Loadout& l, float time) {
     if (glide) { armSwingL = armSwingR = 3.0f; elbowL = elbowR = 0.1f; legSwingL = legSwingR = 0.1f; kneeL = kneeR = -0.3f; }
     if (dbno) { armSwingL = 2.2f + cycle * 0.5f; armSwingR = 2.2f - cycle * 0.5f; kneeL = kneeR = -0.5f; }
 
+    setDrawMaterial(M_FABRIC);
     Basis torsoB = compose(body, yawBasis(torsoTwist));
     si::Vec3 hips = root + body.u * (hipH + bob);
 
@@ -322,6 +379,7 @@ void drawCharacter(const CharPose& p, const Loadout& l, float time) {
     si::Vec3 handR = limb2(shR, torsoB, aR, elbowR, arm, &handB);
 
     // Head
+    setDrawMaterial(M_PLAIN);
     si::Vec3 head = chest + torsoB.u * 0.47f;
     Basis headB = compose(torsoB, yawPitchBasis(0, sky || dbno ? 1.0f : clampf(p.pitch * 0.5f, -0.4f, 0.4f)));
     drawBox(head, {0.2f, 0.22f, 0.2f}, headB, skin);
@@ -368,6 +426,7 @@ void drawCharacter(const CharPose& p, const Loadout& l, float time) {
             break;
     }
     // Back bling
+    setDrawMaterial(M_FABRIC);
     const CosmeticStyle& bs = styleOf(l.backbling, CosmeticType::BackBling);
     si::Vec3 back = (chest + abdomen) * 0.5f - torsoB.f * 0.18f;
     switch (bs.shape) {
@@ -408,11 +467,13 @@ void drawCharacter(const CharPose& p, const Loadout& l, float time) {
     }
     // Held item in right hand
     if (!sky && !glide && !swim && !dbno && !p.building && !p.emote) {
+        setDrawMaterial(M_METAL);
         si::Vec3 hand = handR - handB.u * 0.05f;
         Basis itemB = compose(yawBasis(p.yaw), yawPitchBasis(0, aiming ? p.pitch : -0.3f));
         drawHeldItem(hand, itemB, p.heldType, p.heldRarity, l, p.swing);
     }
-    if (glide) drawGlider(p.pos, p.yaw, l);
+    if (glide) { setDrawMaterial(M_FABRIC); drawGlider(p.pos, p.yaw, l); }
+    setDrawMaterial(M_PLAIN);
 }
 
 } // namespace client

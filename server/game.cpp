@@ -811,58 +811,96 @@ void Game::updateSupplyDrops(float dt) {
     }
 }
 
+// Projectile stats: guns scale with rarity, throwables use their base definition.
+static WeaponStats projectileStats(ItemType t, Rarity r) {
+    const ItemDef& d = itemDef(t);
+    return d.cls == ItemClass::Gun ? weaponStats(t, r) : d.weapon;
+}
+
 void Game::updateProjectiles(float dt) {
     for (auto& pr : projectiles) {
         if (!pr.alive) continue;
-        bool rocket = pr.type == ItemType::RocketLauncher;
-        if (!rocket) pr.vel.y -= GRAVITY * 0.9f * dt;
+        WeaponStats ws = projectileStats(pr.type, pr.rarity);
+        auto detonate = [&](const Vec3& at) {
+            if (pr.type == ItemType::ImpulseGrenade) {
+                effects.push_back({FX_EXPLOSION, pr.owner, at, {}, 1});
+                for (auto& [id, p] : players) {
+                    if (!p.active()) continue;
+                    Vec3 off = p.move.pos + Vec3{0, 1, 0} - at;
+                    if (off.len() > ws.explosionRadius) continue;
+                    p.move.vel = off.norm() * 18.0f + Vec3{0, 16, 0};
+                    p.move.mode = MoveMode::Air;
+                    p.move.fallStartY = p.move.pos.y + 1000;
+                }
+            } else if (ws.explosionRadius > 0) {
+                explode(at, ws.explosionRadius, ws.damage, ws.structureMul, pr.owner, pr.team, pr.type);
+            }
+            pr.alive = false;
+        };
+        pr.fuse -= dt;
+        if (pr.stuck) {
+            // Follow the player a sticky charge is attached to
+            if (pr.stuckTo != 0xFFFF) {
+                auto it = players.find(pr.stuckTo);
+                if (it != players.end() && it->second.active()) pr.pos = it->second.move.pos + pr.stuckOffset;
+            }
+            if (pr.fuse <= 0) detonate(pr.pos);
+            continue;
+        }
+        pr.vel.y -= GRAVITY * ws.projectileGravity * dt;
         Vec3 step = pr.vel * dt;
         float len = step.len();
-        RayHit h = world.raycast(pr.pos, step / std::max(len, 1e-5f), len);
+        Vec3 dir = step / std::max(len, 1e-5f);
+        RayHit h = world.raycast(pr.pos, dir, len);
         float tp;
-        bool head;
-        uint16_t victim = raycastPlayers(pr.pos, step / std::max(len, 1e-5f), len, pr.owner, tp, head);
+        bool head = false;
+        uint16_t victim = raycastPlayers(pr.pos, dir, len, pr.owner, tp, head);
         bool hitPlayer = victim != 0xFFFF && (!h.hit || tp < h.t);
-        if (rocket) {
-            pr.fuse -= dt;
-            if (h.hit || hitPlayer || pr.fuse <= 0) {
-                Vec3 at = hitPlayer ? pr.pos + step.norm() * tp : (h.hit ? h.point : pr.pos);
-                WeaponStats ws = weaponStats(pr.type, pr.rarity);
-                explode(at, ws.explosionRadius, ws.damage, ws.structureMul, pr.owner, pr.team, pr.type);
+        if (hitPlayer) {
+            Vec3 at = pr.pos + dir * tp;
+            auto vit = players.find(victim);
+            if (ws.stick && ws.explosionRadius > 0 && vit != players.end()) {
+                // Sticky charge attaches to the player
+                pr.stuck = true;
+                pr.stuckTo = victim;
+                pr.stuckOffset = at - vit->second.move.pos;
+                pr.pos = at;
+            } else if (ws.explosionRadius > 0) {
+                detonate(at);
+            } else if (vit != players.end()) {
+                // Direct-hit bolt
+                damagePlayer(vit->second, std::round(ws.damage * (head ? ws.headshotMul : 1.0f)), pr.owner, pr.type, head ? KF_HEADSHOT : 0);
+                effects.push_back({FX_IMPACT, pr.owner, at, {}, 0});
                 pr.alive = false;
+            }
+            continue;
+        }
+        if (h.hit) {
+            if (ws.explodeOnImpact) { detonate(h.point); continue; }
+            if (ws.stick) {
+                pr.pos = h.point + h.normal * 0.05f;
+                pr.stuck = true;
+                pr.vel = {};
+                if (ws.explosionRadius <= 0) {
+                    // Bolts damage what they hit and stay embedded briefly
+                    if (!h.terrain) damageShape(h.shapeId, ws.damage * ws.structureMul, nullptr, false);
+                    effects.push_back({FX_IMPACT, pr.owner, h.point, h.normal, 0});
+                    pr.fuse = std::min(pr.fuse, 2.0f);
+                }
                 continue;
             }
-            pr.pos += step;
-        } else {
-            if (h.hit) {
-                // Bounce
+            if (ws.bounce) {
                 pr.pos = h.point + h.normal * 0.05f;
-                Vec3 n = h.normal;
-                pr.vel = (pr.vel - n * (2 * pr.vel.dot(n))) * 0.45f;
+                pr.vel = (pr.vel - h.normal * (2 * pr.vel.dot(h.normal))) * 0.45f;
             } else {
-                pr.pos += step;
-            }
-            pr.fuse -= dt;
-            if (pr.fuse <= 0) {
-                const ItemDef& d = itemDef(pr.type);
-                if (pr.type == ItemType::ImpulseGrenade) {
-                    Effect e{FX_EXPLOSION, pr.owner, pr.pos, {}, 1};
-                    effects.push_back(e);
-                    for (auto& [id, p] : players) {
-                        if (!p.active()) continue;
-                        Vec3 off = p.move.pos + Vec3{0, 1, 0} - pr.pos;
-                        float dist = off.len();
-                        if (dist > d.weapon.explosionRadius) continue;
-                        Vec3 dir = off.norm();
-                        p.move.vel = dir * 18.0f + Vec3{0, 16, 0};
-                        p.move.mode = MoveMode::Air;
-                        p.move.fallStartY = p.move.pos.y + 1000;
-                    }
-                } else {
-                    explode(pr.pos, d.weapon.explosionRadius, d.weapon.damage, d.weapon.structureMul, pr.owner, pr.team, pr.type);
-                }
                 pr.alive = false;
             }
+        } else {
+            pr.pos += step;
+        }
+        if (pr.fuse <= 0) {
+            if (ws.explosionRadius > 0 || pr.type == ItemType::ImpulseGrenade) detonate(pr.pos);
+            else pr.alive = false;
         }
         if (pr.pos.y < -30) pr.alive = false;
     }
@@ -1231,7 +1269,7 @@ void Game::fireGun(Player& p) {
         pr.team = p.team;
         pr.pos = a.origin + a.dir * 0.8f;
         pr.vel = a.dir * ws.projectileSpeed;
-        pr.fuse = 8.0f;
+        pr.fuse = ws.fuse;
         projectiles.push_back(pr);
         return;
     }
@@ -1311,8 +1349,9 @@ void Game::throwItem(Player& p) {
     pr.owner = p.id;
     pr.team = p.team;
     pr.pos = a.origin + a.dir * 0.6f;
-    pr.vel = a.dir * 22.0f + Vec3{0, 5, 0} + p.move.vel * 0.5f;
-    pr.fuse = 2.4f;
+    const WeaponStats& ws = itemDef(h->type).weapon;
+    pr.vel = a.dir * ws.projectileSpeed + Vec3{0, 5, 0} + p.move.vel * 0.5f;
+    pr.fuse = ws.fuse;
     projectiles.push_back(pr);
     h->count--;
     if (h->count == 0) *h = {};

@@ -9,6 +9,8 @@ namespace ui {
 // Palette
 extern const Color BG, PANEL, PANEL2, LINE, TEXT, MUTED, ACCENT, GOOD, WARN, BAD, GOLDEN;
 
+void loadFonts();   // call after InitWindow
+void unloadFonts(); // call before CloseWindow
 void beginFrame();
 float scale();                       // UI scale factor based on window height
 int px(float v);                     // scale a design-space pixel value

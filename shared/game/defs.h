@@ -4,7 +4,7 @@
 
 namespace si {
 
-constexpr int PROTOCOL_VERSION = 3;
+constexpr int PROTOCOL_VERSION = 4;
 constexpr float SIM_DT = 1.0f / 60.0f;      // fixed movement step (client prediction + server)
 constexpr float SERVER_TICK_DT = 1.0f / 30.0f;
 constexpr int MAX_PLAYERS = 100;
@@ -68,9 +68,18 @@ enum class ItemType : uint8_t {
     SniperRifle,
     RocketLauncher,
     Minigun,
+    HeavyRifle,
+    CompactSMG,
+    DoubleBarrel,
+    HeavyShotgun,
+    HuntingRifle,
+    HandCannon,
+    GrenadeLauncher,
+    Crossbow,
     // throwables
     Grenade,
     ImpulseGrenade,
+    StickyCharge,
     // consumables
     Bandages,
     Medkit,
@@ -78,6 +87,7 @@ enum class ItemType : uint8_t {
     ShieldPotion,
     RegenSoda,
     MegaFlask,
+    FieldKit,
     // traps / utility
     LaunchPad,
     // pickups that never sit in the inventory

@@ -79,7 +79,8 @@ void App::drawPreview(Rectangle area, const Loadout& l) {
     BeginTextureMode(previewRT_);
     ClearBackground(BLANK);
     BeginMode3D(cam);
-    previewLight_.begin(cam.position);
+    previewLight_.shadows = false;
+    previewLight_.begin(cam, (float)GetTime());
     BeginShaderMode(previewLight_.shader);
     drawBox({0, -0.1f, 0}, {1.1f, 0.1f, 1.1f}, yawBasis(spin_ * 0.3f), Color{60, 80, 120, 255});
     CharPose p;
@@ -97,6 +98,7 @@ void App::drawPreview(Rectangle area, const Loadout& l) {
     }
     drawCharacter(p, l, (float)GetTime());
     EndShaderMode();
+    previewLight_.endObjects();
     EndMode3D();
     EndTextureMode();
     // Render textures are stored upside down
@@ -423,7 +425,8 @@ void App::drawSettingsTab(Rectangle a) {
     y += 44 * s;
     ui::checkbox({x, y, w, 30 * s}, settings_.showFps, "Show FPS");
     y += 40 * s;
-    ui::checkbox({x, y, w, 30 * s}, settings_.invertY, "Invert mouse Y");
+    ui::checkbox({x, y, w * 0.45f, 30 * s}, settings_.invertY, "Invert mouse Y");
+    ui::checkbox({x + w * 0.5f, y, w * 0.5f, 30 * s}, settings_.shadows, "Real-time shadows");
     y += 50 * s;
     ui::text("Backend URL", x, y + 10 * s, 18, ui::MUTED);
     ui::textBox({x + 220 * s, y, w - 220 * s, 40 * s}, settings_.backendUrl, "http://host:8080", 205, false, 100);

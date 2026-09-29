@@ -102,6 +102,14 @@ void Game::botChooseWeapon(Player& p, float dist) {
             case ItemType::SniperRifle: score += dist > 60 ? 45 : -10; break;
             case ItemType::RocketLauncher: score += dist > 15 && dist < 80 ? 20 : -40; break;
             case ItemType::Minigun: score += dist < 50 ? 28 : 5; break;
+            case ItemType::HeavyRifle: score += dist < 12 ? 12 : 28; break;
+            case ItemType::CompactSMG: score += dist < 20 ? 32 : -5; break;
+            case ItemType::DoubleBarrel: score += dist < 8 ? 45 : -35; break;
+            case ItemType::HeavyShotgun: score += dist < 14 ? 42 : dist < 22 ? 12 : -30; break;
+            case ItemType::HuntingRifle: score += dist > 45 ? 40 : -5; break;
+            case ItemType::HandCannon: score += dist < 60 ? 22 : 8; break;
+            case ItemType::GrenadeLauncher: score += dist > 12 && dist < 50 ? 24 : -40; break;
+            case ItemType::Crossbow: score += dist > 20 && dist < 90 ? 26 : 0; break;
             case ItemType::Pistol: score += 5; break;
             default: break;
         }
@@ -263,8 +271,17 @@ void Game::botFight(Player& p, float dt, InputCmd& out) {
     }
     out.right = (int8_t)b.strafeDir;
     float preferred = 18.0f;
-    if (h && (h->type == ItemType::PumpShotgun || h->type == ItemType::TacticalShotgun)) preferred = 5.0f;
-    if (h && (h->type == ItemType::SniperRifle || h->type == ItemType::ScopedRifle)) preferred = 60.0f;
+    if (h && (h->type == ItemType::PumpShotgun || h->type == ItemType::TacticalShotgun || h->type == ItemType::DoubleBarrel ||
+              h->type == ItemType::HeavyShotgun)) preferred = 5.0f;
+    if (h && (h->type == ItemType::SniperRifle || h->type == ItemType::ScopedRifle || h->type == ItemType::HuntingRifle)) preferred = 60.0f;
+    // Arc lobbed projectiles upward a little
+    if (h && !h->empty()) {
+        WeaponStats hs = weaponStats(h->type, h->rarity);
+        if (hs.projectile && hs.projectileGravity > 0 && hs.projectileSpeed > 0) {
+            float tFlight = dist / hs.projectileSpeed;
+            aimPt.y += 0.5f * GRAVITY * hs.projectileGravity * tFlight * tFlight;
+        }
+    }
     out.fwd = dist > preferred + 5 ? 1 : dist < preferred - 4 ? -1 : 0;
     if (cfg.botDifficulty >= BotDifficulty::Hard && p.move.onGround && rng_.chance(0.02f)) out.buttons |= IN_JUMP;
 

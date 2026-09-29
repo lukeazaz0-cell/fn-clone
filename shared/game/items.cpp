@@ -49,6 +49,7 @@ std::array<ItemDef, (size_t)ItemType::Count> buildDefs() {
     gun(ItemType::SniperRifle, "Bolt Sniper", AmmoType::Heavy, Rarity::Rare, Rarity::Legendary, w, rgb(60, 50, 40));
 
     w = {}; w.damage = 85; w.fireInterval = 1.0f / 0.75f; w.magSize = 1; w.reloadTime = 3.0f; w.range = 400; w.projectile = true;
+    w.explodeOnImpact = true; w.fuse = 8.0f;
     w.projectileSpeed = 60; w.explosionRadius = 5.5f; w.structureMul = 4.0f; w.automatic = false; w.spreadHip = 0.005f;
     w.spreadAds = 0.0f; w.equipTime = 0.6f;
     gun(ItemType::RocketLauncher, "Rocket Launcher", AmmoType::Rockets, Rarity::Rare, Rarity::Legendary, w, rgb(60, 90, 60));
@@ -57,16 +58,57 @@ std::array<ItemDef, (size_t)ItemType::Count> buildDefs() {
     w.spreadAds = 0.045f; w.structureMul = 1.5f; w.spinUp = 0.6f; w.bloomPerShot = 0.002f; w.maxBloom = 0.03f;
     gun(ItemType::Minigun, "Minigun", AmmoType::Light, Rarity::Epic, Rarity::Legendary, w, rgb(50, 50, 55));
 
+    w = {}; w.damage = 36; w.fireInterval = 1.0f / 3.8f; w.magSize = 25; w.reloadTime = 2.6f; w.range = 260; w.falloffStart = 60;
+    w.spreadHip = 0.05f; w.spreadAds = 0.01f; w.bloomPerShot = 0.012f; w.maxBloom = 0.06f; w.adsZoom = 1.5f;
+    gun(ItemType::HeavyRifle, "Heavy Assault Rifle", AmmoType::Medium, Rarity::Rare, Rarity::Legendary, w, rgb(85, 75, 65));
+
+    w = {}; w.damage = 14; w.fireInterval = 1.0f / 15.0f; w.magSize = 40; w.reloadTime = 2.0f; w.range = 90; w.falloffStart = 20;
+    w.falloffMin = 0.45f; w.spreadHip = 0.055f; w.spreadAds = 0.04f; w.bloomPerShot = 0.004f; w.maxBloom = 0.075f; w.equipTime = 0.25f;
+    gun(ItemType::CompactSMG, "Compact SMG", AmmoType::Light, Rarity::Uncommon, Rarity::Legendary, w, rgb(55, 60, 75));
+
+    w = {}; w.damage = 11; w.pellets = 10; w.fireInterval = 0.3f; w.magSize = 2; w.reloadTime = 3.0f; w.range = 22; w.falloffStart = 5;
+    w.falloffMin = 0.25f; w.spreadHip = 0.1f; w.spreadAds = 0.085f; w.automatic = false; w.structureMul = 0.9f; w.equipTime = 0.4f;
+    gun(ItemType::DoubleBarrel, "Double Barrel", AmmoType::Shells, Rarity::Rare, Rarity::Legendary, w, rgb(110, 75, 45));
+
+    w = {}; w.damage = 8.5f; w.pellets = 10; w.fireInterval = 1.0f / 1.1f; w.magSize = 7; w.reloadTime = 5.2f; w.range = 40; w.falloffStart = 9;
+    w.falloffMin = 0.35f; w.spreadHip = 0.07f; w.spreadAds = 0.055f; w.automatic = false; w.structureMul = 1.0f;
+    gun(ItemType::HeavyShotgun, "Heavy Shotgun", AmmoType::Shells, Rarity::Epic, Rarity::Legendary, w, rgb(70, 70, 75));
+
+    w = {}; w.damage = 86; w.headshotMul = 2.0f; w.fireInterval = 1.0f / 0.8f; w.magSize = 1; w.reloadTime = 1.9f; w.range = 450;
+    w.falloffStart = 450; w.spreadHip = 0.06f; w.spreadAds = 0.0f; w.automatic = false; w.adsZoom = 2.2f; w.equipTime = 0.4f;
+    gun(ItemType::HuntingRifle, "Hunting Rifle", AmmoType::Heavy, Rarity::Uncommon, Rarity::Epic, w, rgb(130, 90, 50));
+
+    w = {}; w.damage = 70; w.headshotMul = 2.0f; w.fireInterval = 1.0f / 0.9f; w.magSize = 7; w.reloadTime = 2.0f; w.range = 180; w.falloffStart = 40;
+    w.spreadHip = 0.035f; w.spreadAds = 0.01f; w.bloomPerShot = 0.03f; w.maxBloom = 0.08f; w.automatic = false; w.equipTime = 0.3f;
+    gun(ItemType::HandCannon, "Hand Cannon", AmmoType::Heavy, Rarity::Epic, Rarity::Legendary, w, rgb(90, 85, 80));
+
+    w = {}; w.damage = 80; w.fireInterval = 1.0f / 1.3f; w.magSize = 6; w.reloadTime = 3.0f; w.range = 250; w.projectile = true;
+    w.projectileSpeed = 36; w.projectileGravity = 0.6f; w.bounce = true; w.fuse = 1.8f; w.explosionRadius = 4.5f; w.structureMul = 3.0f;
+    w.automatic = false; w.spreadHip = 0.01f; w.spreadAds = 0.0f; w.equipTime = 0.5f;
+    gun(ItemType::GrenadeLauncher, "Grenade Launcher", AmmoType::Rockets, Rarity::Rare, Rarity::Legendary, w, rgb(70, 90, 60));
+
+    w = {}; w.damage = 95; w.headshotMul = 2.0f; w.fireInterval = 1.0f / 0.9f; w.magSize = 1; w.reloadTime = 1.5f; w.range = 300;
+    w.projectile = true; w.projectileSpeed = 85; w.projectileGravity = 0.35f; w.stick = true; w.fuse = 6.0f; w.automatic = false;
+    w.spreadHip = 0.02f; w.spreadAds = 0.0f; w.adsZoom = 1.8f; w.equipTime = 0.4f; w.structureMul = 0.6f;
+    gun(ItemType::Crossbow, "Crossbow", AmmoType::Heavy, Rarity::Uncommon, Rarity::Epic, w, rgb(115, 80, 50));
+
     auto thr = [&](ItemType t, const char* name, float dmg, float radius, int stack, Color4 c) {
         ItemDef& def = d[(size_t)t];
         def.type = t; def.name = name; def.cls = ItemClass::Throwable; def.maxStack = stack; def.color = c;
         def.minRarity = def.maxRarity = t == ItemType::Grenade ? Rarity::Uncommon : Rarity::Rare;
-        WeaponStats ws; ws.damage = dmg; ws.explosionRadius = radius; ws.projectile = true; ws.projectileSpeed = 24;
+        WeaponStats ws; ws.damage = dmg; ws.explosionRadius = radius; ws.projectile = true; ws.projectileSpeed = 22;
         ws.fireInterval = 0.8f; ws.automatic = false; ws.magSize = 1; ws.structureMul = 3.0f; ws.equipTime = 0.2f;
+        ws.projectileGravity = 0.9f; ws.bounce = true; ws.fuse = 2.4f;
         def.weapon = ws;
     };
     thr(ItemType::Grenade, "Grenade", 100, 5.0f, 6, rgb(60, 110, 60));
     thr(ItemType::ImpulseGrenade, "Impulse Grenade", 0, 6.0f, 3, rgb(90, 110, 220));
+    thr(ItemType::StickyCharge, "Sticky Charge", 90, 4.5f, 4, rgb(200, 80, 60));
+    d[(size_t)ItemType::StickyCharge].weapon.bounce = false;
+    d[(size_t)ItemType::StickyCharge].weapon.stick = true;
+    d[(size_t)ItemType::StickyCharge].weapon.fuse = 3.0f;
+    d[(size_t)ItemType::StickyCharge].weapon.structureMul = 5.0f;
+    d[(size_t)ItemType::StickyCharge].minRarity = d[(size_t)ItemType::StickyCharge].maxRarity = Rarity::Epic;
 
     auto con = [&](ItemType t, const char* name, Rarity r, ConsumableStats cs, Color4 c) {
         ItemDef& def = d[(size_t)t];
@@ -86,6 +128,8 @@ std::array<ItemDef, (size_t)ItemType::Count> buildDefs() {
     con(ItemType::RegenSoda, "Regen Soda", Rarity::Epic, cs, rgb(110, 60, 220));
     cs = {}; cs.useTime = 15.0f; cs.heal = 100; cs.shield = 100; cs.maxStack = 1; cs.movementWhileUsing = false;
     con(ItemType::MegaFlask, "Mega Flask", Rarity::Legendary, cs, rgb(60, 140, 255));
+    cs = {}; cs.useTime = 4.0f; cs.heal = 50; cs.healCap = 100; cs.shield = 25; cs.shieldCap = 100; cs.maxStack = 3;
+    con(ItemType::FieldKit, "Field Kit", Rarity::Rare, cs, rgb(90, 160, 90));
 
     {
         ItemDef& def = d[(size_t)ItemType::LaunchPad];
@@ -211,6 +255,9 @@ ItemStack rollWeapon(Rng& rng, LootSource src) {
         {ItemType::Pistol, 10},       {ItemType::SniperRifle, 4},  {ItemType::RocketLauncher, 3},
         {ItemType::Minigun, 2},       {ItemType::Grenade, 6},      {ItemType::ImpulseGrenade, 4},
         {ItemType::LaunchPad, 1.5f},
+        {ItemType::HeavyRifle, 7},    {ItemType::CompactSMG, 8},   {ItemType::DoubleBarrel, 6},
+        {ItemType::HeavyShotgun, 4},  {ItemType::HuntingRifle, 5}, {ItemType::HandCannon, 4},
+        {ItemType::GrenadeLauncher, 2.5f}, {ItemType::Crossbow, 4}, {ItemType::StickyCharge, 3},
     };
     float total = 0;
     for (auto& e : table) total += e.w;
@@ -231,7 +278,7 @@ ItemStack rollConsumable(Rng& rng) {
     struct Entry { ItemType t; float w; int count; };
     static const Entry table[] = {
         {ItemType::Bandages, 30, 5}, {ItemType::Medkit, 14, 1}, {ItemType::SmallShield, 26, 3},
-        {ItemType::ShieldPotion, 18, 1}, {ItemType::RegenSoda, 8, 1}, {ItemType::MegaFlask, 3, 1},
+        {ItemType::ShieldPotion, 18, 1}, {ItemType::RegenSoda, 8, 1}, {ItemType::MegaFlask, 3, 1}, {ItemType::FieldKit, 10, 2},
     };
     float total = 0;
     for (auto& e : table) total += e.w;

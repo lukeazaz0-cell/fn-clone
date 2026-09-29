@@ -8,81 +8,7 @@
 
 namespace client {
 
-// ------------------------------------------------------------------ shader
-
-static const char* kVS = R"(#version 330
-in vec3 vertexPosition;
-in vec3 vertexNormal;
-in vec4 vertexColor;
-uniform mat4 mvp;
-uniform mat4 matModel;
-uniform mat4 matNormal;
-out vec3 fragPos;
-out vec3 fragNormal;
-out vec4 fragColor;
-void main() {
-    fragPos = vec3(matModel * vec4(vertexPosition, 1.0));
-    fragNormal = normalize(vec3(matNormal * vec4(vertexNormal, 0.0)));
-    fragColor = vertexColor;
-    gl_Position = mvp * vec4(vertexPosition, 1.0);
-}
-)";
-
-static const char* kFS = R"(#version 330
-in vec3 fragPos;
-in vec3 fragNormal;
-in vec4 fragColor;
-uniform vec4 colDiffuse;
-uniform vec3 viewPos;
-uniform vec3 sunDir;
-uniform vec3 fogColor;
-uniform float fogDensity;
-out vec4 finalColor;
-void main() {
-    vec3 n = normalize(fragNormal);
-    if (!gl_FrontFacing) n = -n;
-    float diff = max(dot(n, -sunDir), 0.0);
-    float sky = 0.5 + 0.5 * n.y;
-    vec3 base = fragColor.rgb * colDiffuse.rgb;
-    vec3 c = base * (0.38 + 0.22 * sky + 0.62 * diff);
-    float dist = length(viewPos - fragPos);
-    float f = 1.0 - exp(-pow(dist * fogDensity, 2.0));
-    c = mix(c, fogColor, clamp(f, 0.0, 1.0));
-    finalColor = vec4(c, fragColor.a * colDiffuse.a);
-}
-)";
-
-void Lighting::load() {
-    shader = LoadShaderFromMemory(kVS, kFS);
-    locViewPos = GetShaderLocation(shader, "viewPos");
-    locSunDir = GetShaderLocation(shader, "sunDir");
-    locFogColor = GetShaderLocation(shader, "fogColor");
-    locFogDensity = GetShaderLocation(shader, "fogDensity");
-    locModel = GetShaderLocation(shader, "matModel");
-    locNormal = GetShaderLocation(shader, "matNormal");
-    shader.locs[SHADER_LOC_MATRIX_MODEL] = locModel;
-    shader.locs[SHADER_LOC_MATRIX_NORMAL] = locNormal;
-    shader.locs[SHADER_LOC_VECTOR_VIEW] = locViewPos;
-    Vector3 sun = Vector3Normalize({-0.45f, -0.8f, -0.35f});
-    SetShaderValue(shader, locSunDir, &sun, SHADER_UNIFORM_VEC3);
-}
-
-void Lighting::unload() {
-    if (shader.id) UnloadShader(shader);
-    shader = {};
-}
-
-void Lighting::begin(const Vector3& camPos) {
-    SetShaderValue(shader, locViewPos, &camPos, SHADER_UNIFORM_VEC3);
-    float fc[3] = {fogColor.r / 255.0f, fogColor.g / 255.0f, fogColor.b / 255.0f};
-    SetShaderValue(shader, locFogColor, fc, SHADER_UNIFORM_VEC3);
-    SetShaderValue(shader, locFogDensity, &fogDensity, SHADER_UNIFORM_FLOAT);
-    Matrix id = MatrixIdentity();
-    SetShaderValueMatrix(shader, locModel, id);
-    SetShaderValueMatrix(shader, locNormal, id);
-}
-
-void Lighting::setTint(Color) {}
+extern unsigned int gAtlasTex;
 
 // ------------------------------------------------------------------ primitives
 
@@ -112,12 +38,13 @@ Basis compose(const Basis& p, const Basis& l) {
     return b;
 }
 
+static void vtx(const si::Vec3& p, float ao = 1.0f) {
+    rlTexCoord2f((float)drawMaterial(), ao);
+    rlVertex3f(p.x, p.y, p.z);
+}
 static void quad(const si::Vec3& a, const si::Vec3& b, const si::Vec3& c, const si::Vec3& d, const si::Vec3& n) {
     rlNormal3f(n.x, n.y, n.z);
-    rlVertex3f(a.x, a.y, a.z);
-    rlVertex3f(b.x, b.y, b.z);
-    rlVertex3f(c.x, c.y, c.z);
-    rlVertex3f(d.x, d.y, d.z);
+    vtx(a); vtx(b); vtx(c); vtx(d);
 }
 
 void drawBox(const si::Vec3& c, const si::Vec3& h, const Basis& b0, Color col) {
@@ -127,6 +54,7 @@ void drawBox(const si::Vec3& c, const si::Vec3& h, const Basis& b0, Color col) {
     si::Vec3 R = b.r * h.x, U = b.u * h.y, F = b.f * h.z;
     si::Vec3 p[8] = {c - R - U - F, c + R - U - F, c + R + U - F, c - R + U - F,
                      c - R - U + F, c + R - U + F, c + R + U + F, c - R + U + F};
+    rlSetTexture(gAtlasTex);
     rlBegin(RL_QUADS);
     rlColor4ub(col.r, col.g, col.b, col.a);
     quad(p[4], p[5], p[6], p[7], b.f);         // front (+f)
@@ -151,6 +79,7 @@ void drawRampShape(const AABB& b, uint8_t dir, Color col) {
     }
     si::Vec3 n = (c[1] - c[0]).cross(c[3] - c[0]).norm();
     if (n.y < 0) n = n * -1.0f;
+    rlSetTexture(gAtlasTex);
     rlBegin(RL_QUADS);
     rlColor4ub(col.r, col.g, col.b, col.a);
     quad(c[0], c[1], c[2], c[3], n);
@@ -161,14 +90,15 @@ void drawRampShape(const AABB& b, uint8_t dir, Color col) {
 void drawPyramid(const AABB& b, Color col) {
     si::Vec3 apex{(b.min.x + b.max.x) / 2, b.max.y, (b.min.z + b.max.z) / 2};
     si::Vec3 c0{b.min.x, b.min.y, b.min.z}, c1{b.max.x, b.min.y, b.min.z}, c2{b.max.x, b.min.y, b.max.z}, c3{b.min.x, b.min.y, b.max.z};
+    rlSetTexture(gAtlasTex);
     rlBegin(RL_TRIANGLES);
     rlColor4ub(col.r, col.g, col.b, col.a);
     auto tri = [&](const si::Vec3& a, const si::Vec3& b2, const si::Vec3& c) {
         si::Vec3 n = (b2 - a).cross(c - a).norm();
         if (n.y < 0) { n = n * -1.0f; }
         rlNormal3f(n.x, n.y, n.z);
-        rlVertex3f(a.x, a.y, a.z); rlVertex3f(b2.x, b2.y, b2.z); rlVertex3f(c.x, c.y, c.z);
-        rlVertex3f(c.x, c.y, c.z); rlVertex3f(b2.x, b2.y, b2.z); rlVertex3f(a.x, a.y, a.z);
+        vtx(a); vtx(b2); vtx(c);
+        vtx(c); vtx(b2); vtx(a);
     };
     tri(c0, c1, apex); tri(c1, c2, apex); tri(c2, c3, apex); tri(c3, c0, apex);
     rlEnd();
@@ -188,8 +118,10 @@ Color materialColor(si::Material m) {
 namespace {
 
 struct MeshBuilder {
-    std::vector<float> pos, nrm;
+    std::vector<float> pos, nrm, tc, tc2;
     std::vector<unsigned char> col;
+    float curMat = 0;   // surface material id written to texcoord.x
+    float curAO = 1.0f; // ambient occlusion written to texcoord.y
     std::vector<unsigned short> idx;
     std::vector<Mesh> done;
 
@@ -205,6 +137,10 @@ struct MeshBuilder {
         m.vertices = (float*)MemAlloc((unsigned)(pos.size() * sizeof(float)));
         m.normals = (float*)MemAlloc((unsigned)(nrm.size() * sizeof(float)));
         m.colors = (unsigned char*)MemAlloc((unsigned)col.size());
+        m.texcoords = (float*)MemAlloc((unsigned)(tc.size() * sizeof(float)));
+        m.texcoords2 = (float*)MemAlloc((unsigned)(tc2.size() * sizeof(float)));
+        std::memcpy(m.texcoords, tc.data(), tc.size() * sizeof(float));
+        std::memcpy(m.texcoords2, tc2.data(), tc2.size() * sizeof(float));
         m.indices = (unsigned short*)MemAlloc((unsigned)(idx.size() * sizeof(unsigned short)));
         std::memcpy(m.vertices, pos.data(), pos.size() * sizeof(float));
         std::memcpy(m.normals, nrm.data(), nrm.size() * sizeof(float));
@@ -212,13 +148,29 @@ struct MeshBuilder {
         std::memcpy(m.indices, idx.data(), idx.size() * sizeof(unsigned short));
         UploadMesh(&m, false);
         done.push_back(m);
-        pos.clear(); nrm.clear(); col.clear(); idx.clear();
+        pos.clear(); nrm.clear(); col.clear(); idx.clear(); tc.clear(); tc2.clear();
     }
-    unsigned short vert(const si::Vec3& p, const si::Vec3& n, Color c) {
+    unsigned short vert(const si::Vec3& p, const si::Vec3& n, Color c, float ao = -1.0f) {
         pos.push_back(p.x); pos.push_back(p.y); pos.push_back(p.z);
         nrm.push_back(n.x); nrm.push_back(n.y); nrm.push_back(n.z);
         col.push_back(c.r); col.push_back(c.g); col.push_back(c.b); col.push_back(255);
+        tc.push_back(curMat); tc.push_back(ao < 0 ? curAO : ao);
+        tc2.push_back(0); tc2.push_back(0);
         return (unsigned short)(verts() - 1);
+    }
+    // Terrain vertex: color alpha = baked AO, texcoords = blend weights.
+    unsigned short vertT(const si::Vec3& p, const si::Vec3& n, Color c, float ao, float wg, float ws, float wsn, float wr) {
+        pos.push_back(p.x); pos.push_back(p.y); pos.push_back(p.z);
+        nrm.push_back(n.x); nrm.push_back(n.y); nrm.push_back(n.z);
+        col.push_back(c.r); col.push_back(c.g); col.push_back(c.b); col.push_back((unsigned char)(clampf(ao, 0, 1) * 255));
+        tc.push_back(wg); tc.push_back(ws);
+        tc2.push_back(wsn); tc2.push_back(wr);
+        return (unsigned short)(verts() - 1);
+    }
+    void quadAO(const si::Vec3& a, const si::Vec3& b, const si::Vec3& c, const si::Vec3& d, const si::Vec3& n, Color col, float aa, float ab, float ac, float ad) {
+        flushIfNeeded(4);
+        unsigned short i0 = vert(a, n, col, aa), i1 = vert(b, n, col, ab), i2 = vert(c, n, col, ac), i3 = vert(d, n, col, ad);
+        idx.insert(idx.end(), {i0, i1, i2, i0, i2, i3});
     }
     void quad(const si::Vec3& a, const si::Vec3& b, const si::Vec3& c, const si::Vec3& d, const si::Vec3& n, Color col) {
         flushIfNeeded(4);
@@ -242,15 +194,30 @@ struct MeshBuilder {
         si::Vec3 p[8] = {c - R - U - F, c + R - U - F, c + R + U - F, c - R + U - F,
                          c - R - U + F, c + R - U + F, c + R + U + F, c - R + U + F};
         Color top = col, side = col;
+        // Upright boxes get baked contact occlusion toward their base.
+        float lo = (b.u.y > 0.9f && h.y > 0.15f) ? clampf(0.45f + 0.12f / std::max(0.2f, h.y), 0.45f, 0.8f) : 1.0f;
+        float hi = 1.0f;
         // Counter-clockwise when viewed from outside
-        quad(p[4], p[5], p[6], p[7], b.f, side);
-        quad(p[1], p[0], p[3], p[2], b.f * -1.0f, side);
+        quadAO(p[4], p[5], p[6], p[7], b.f, side, lo, lo, hi, hi);
+        quadAO(p[1], p[0], p[3], p[2], b.f * -1.0f, side, lo, lo, hi, hi);
         quad(p[3], p[7], p[6], p[2], b.u, top);
-        quad(p[0], p[1], p[5], p[4], b.u * -1.0f, side);
-        quad(p[1], p[2], p[6], p[5], b.r, side);
-        quad(p[0], p[4], p[7], p[3], b.r * -1.0f, side);
+        quadAO(p[0], p[1], p[5], p[4], b.u * -1.0f, side, lo, lo, lo, lo);
+        quadAO(p[1], p[2], p[6], p[5], b.r, side, lo, hi, hi, lo);
+        quadAO(p[0], p[4], p[7], p[3], b.r * -1.0f, side, lo, lo, hi, hi);
     }
     void aabb(const AABB& bb, Color col) { box(bb.center(), bb.size() * 0.5f, Basis(), col); }
+    // N-sided prism (barrels, poles)
+    void prism(const si::Vec3& base, float radius, float h, int sides, Color col) {
+        for (int i = 0; i < sides; i++) {
+            float a0 = i * 2 * kPi / sides, a1 = (i + 1) * 2 * kPi / sides;
+            si::Vec3 p0 = base + si::Vec3{std::cos(a0) * radius, 0, std::sin(a0) * radius};
+            si::Vec3 p1 = base + si::Vec3{std::cos(a1) * radius, 0, std::sin(a1) * radius};
+            si::Vec3 up{0, h, 0};
+            si::Vec3 n = si::Vec3{std::cos((a0 + a1) / 2), 0, std::sin((a0 + a1) / 2)};
+            quadAO(p1, p0, p0 + up, p1 + up, n, col, 0.6f, 0.6f, 1.0f, 1.0f);
+            tri(p0 + up, base + up, p1 + up, col);
+        }
+    }
     // N-sided cone (used for pine tiers)
     void cone(const si::Vec3& base, float radius, float h, int sides, Color col, float rot = 0) {
         si::Vec3 apex = base + si::Vec3{0, h, 0};
@@ -397,17 +364,109 @@ void addDecor(MeshBuilder& mb, const Decor& d) {
         case DecorKind::Trim:
             mb.box(p, d.size, Basis(), c);
             break;
+        case DecorKind::RoadLine:
+            mb.box(p, d.size, yawBasis(d.yaw), c);
+            break;
+        case DecorKind::GrassTuft: {
+            for (int i = 0; i < 5; i++) {
+                float a = d.yaw + i * 1.3f;
+                Basis bb = compose(yawBasis(a), yawPitchBasis(0, 0.25f * ((i % 3) - 1)));
+                float hgt = (0.25f + 0.08f * (i % 3)) * s;
+                mb.box(p + si::Vec3{std::cos(a) * 0.12f, hgt, std::sin(a) * 0.12f}, {0.025f * s, hgt, 0.01f}, bb, sh(c, 0.85f + 0.07f * i));
+            }
+            break;
+        }
+        case DecorKind::StreetLamp: {
+            Basis b = yawBasis(d.yaw);
+            mb.prism(p - si::Vec3{0, 0.2f, 0}, 0.12f, 5.6f, 8, c);
+            mb.box(p + si::Vec3{0, 5.5f, 0} + b.r * 0.7f, {0.75f, 0.06f, 0.06f}, b, c);
+            mb.box(p + si::Vec3{0, 5.3f, 0} + b.r * 1.35f, {0.22f, 0.12f, 0.3f}, b, sh(c, 0.8f));
+            mb.box(p + si::Vec3{0, 5.16f, 0} + b.r * 1.35f, {0.18f, 0.03f, 0.25f}, b, Color{255, 236, 170, 255});
+            mb.prism(p - si::Vec3{0, 0.2f, 0}, 0.22f, 0.5f, 8, sh(c, 0.8f));
+            break;
+        }
+        case DecorKind::Bench: {
+            Basis b = yawBasis(d.yaw);
+            for (int k = 0; k < 3; k++) mb.box(p + si::Vec3{0, 0.48f, 0} + b.f * (-0.15f + k * 0.15f), {0.9f, 0.03f, 0.06f}, b, c);
+            for (int k = 0; k < 2; k++) mb.box(p + si::Vec3{0, 0.75f + k * 0.18f, 0} - b.f * 0.26f, {0.9f, 0.06f, 0.025f}, b, c);
+            for (int sd = -1; sd <= 1; sd += 2) {
+                mb.box(p + si::Vec3{0, 0.24f, 0} + b.r * (0.75f * sd), {0.04f, 0.24f, 0.25f}, b, Color{55, 55, 60, 255});
+                mb.box(p + si::Vec3{0, 0.75f, 0} + b.r * (0.75f * sd) - b.f * 0.26f, {0.04f, 0.3f, 0.03f}, b, Color{55, 55, 60, 255});
+            }
+            break;
+        }
+        case DecorKind::Mailbox: {
+            Basis b = yawBasis(d.yaw);
+            mb.box(p + si::Vec3{0, 0.5f, 0}, {0.05f, 0.5f, 0.05f}, b, Color{110, 80, 50, 255});
+            mb.box(p + si::Vec3{0, 1.12f, 0}, {0.16f, 0.14f, 0.26f}, b, c);
+            mb.box(p + si::Vec3{0.18f, 1.2f, 0.1f}, {0.02f, 0.1f, 0.03f}, b, Color{220, 50, 40, 255});
+            break;
+        }
+        case DecorKind::Hydrant:
+            mb.prism(p - si::Vec3{0, 0.05f, 0}, 0.16f, 0.65f, 8, c);
+            mb.prism(p + si::Vec3{0, 0.6f, 0}, 0.2f, 0.08f, 8, sh(c, 0.8f));
+            mb.box(p + si::Vec3{0, 0.4f, 0}, {0.27f, 0.06f, 0.06f}, Basis(), sh(c, 0.85f));
+            mb.box(p + si::Vec3{0, 0.74f, 0}, {0.08f, 0.06f, 0.08f}, Basis(), sh(c, 0.9f));
+            break;
+        case DecorKind::Barrel:
+            mb.prism(p, 0.38f, 1.1f, 10, c);
+            mb.prism(p + si::Vec3{0, 0.3f, 0}, 0.395f, 0.06f, 10, sh(c, 0.7f));
+            mb.prism(p + si::Vec3{0, 0.8f, 0}, 0.395f, 0.06f, 10, sh(c, 0.7f));
+            mb.box(p + si::Vec3{0.18f, 1.11f, 0}, {0.06f, 0.015f, 0.06f}, Basis(), sh(c, 0.6f));
+            break;
+        case DecorKind::Crate: {
+            // Dark frame edges around the wooden crate shape
+            si::Vec3 h = d.size;
+            si::Vec3 ctr = p + si::Vec3{0, h.y, 0};
+            float e = 0.06f;
+            for (int sx = -1; sx <= 1; sx += 2)
+                for (int sz = -1; sz <= 1; sz += 2) mb.box(ctr + si::Vec3{sx * (h.x - e + 0.01f), 0, sz * (h.z - e + 0.01f)}, {e, h.y + 0.01f, e}, Basis(), c);
+            for (int sy = -1; sy <= 1; sy += 2) {
+                mb.box(ctr + si::Vec3{0, sy * (h.y - e), h.z - e + 0.01f}, {h.x, e, e}, Basis(), c);
+                mb.box(ctr + si::Vec3{0, sy * (h.y - e), -(h.z - e + 0.01f)}, {h.x, e, e}, Basis(), c);
+                mb.box(ctr + si::Vec3{h.x - e + 0.01f, sy * (h.y - e), 0}, {e, e, h.z}, Basis(), c);
+                mb.box(ctr + si::Vec3{-(h.x - e + 0.01f), sy * (h.y - e), 0}, {e, e, h.z}, Basis(), c);
+            }
+            break;
+        }
         default: break;
+    }
+}
+
+// Pick a surface texture for a static map shape from its material and render style.
+int surfaceFor(const Shape& s) {
+    switch (s.style) {
+        case 1: return M_GLASS;
+        case 3: case 4: return M_METAL;
+        case 5: return M_FABRIC;
+        case 6: return M_ROCK;
+        case 7: return s.mat == si::Material::Wood ? M_BARK : M_PLAIN;
+        case 8: return M_TILE;
+        default: break;
+    }
+    si::Vec3 sz = s.box.size();
+    bool slab = sz.y < 0.45f && sz.x > 1.5f && sz.z > 1.5f;
+    if (s.kind != ShapeKind::Box && s.mat == si::Material::Wood) return M_ROOF;
+    switch (s.mat) {
+        case si::Material::Wood: return M_WOOD;
+        case si::Material::Metal: return slab ? M_METAL : M_METAL;
+        case si::Material::Brick: {
+            if (!s.destructible) return sz.y > 3.0f ? M_ROCK : M_PLASTER; // foundations / temple blocks
+            if (slab) return M_TILE;
+            bool reddish = s.color.r > s.color.g + 25 && s.color.r > s.color.b + 25;
+            return reddish ? M_BRICK : M_PLASTER;
+        }
+        default: return M_FABRIC;
     }
 }
 
 Color biomeColor(Biome b) {
     switch (b) {
-        case Biome::Grass: return {104, 168, 72, 255};
-        case Biome::Forest: return {76, 138, 64, 255};
+        case Biome::Grass: return {100, 142, 70, 255};
+        case Biome::Forest: return {78, 118, 60, 255};
         case Biome::Snow: return {232, 238, 245, 255};
         case Biome::Desert: return {222, 192, 132, 255};
-        case Biome::Jungle: return {70, 150, 60, 255};
+        case Biome::Jungle: return {72, 132, 62, 255};
         case Biome::Volcanic: return {70, 62, 60, 255};
         case Biome::Beach: return {230, 214, 160, 255};
         case Biome::City: return {140, 150, 160, 255};
@@ -431,7 +490,7 @@ static Color terrainColor(const GameMap& map, float x, float z, float h, float s
     float n = fbm(x * 0.03f, z * 0.03f, 99, 3);
     float f = 0.85f + n * 0.3f;
     c = {(unsigned char)clampf(c.r * f, 0, 255), (unsigned char)clampf(c.g * f, 0, 255), (unsigned char)clampf(c.b * f, 0, 255), 255};
-    if (slope > 0.9f && b != Biome::Snow) c = {125, 118, 108, 255};
+    if (slope > 0.9f && b != Biome::Snow) c = {138, 130, 118, 255};
     if (b == Biome::Snow && slope > 1.2f) c = {170, 175, 185, 255};
     if (h < WATER_LEVEL + 0.6f) c = {205, 190, 140, 255};
     if (h < WATER_LEVEL - 1.5f) c = {150, 140, 110, 255};
@@ -458,7 +517,29 @@ void WorldRenderer::buildTerrain() {
                     float hd = m.vertexHeight(ix, std::max(0, iz - 1)), hu = m.vertexHeight(ix, std::min(HM_N, iz + 1));
                     si::Vec3 nrm = si::Vec3{hl - hr, 2 * CELL, hd - hu}.norm();
                     float slope = std::sqrt((hr - hl) * (hr - hl) + (hu - hd) * (hu - hd)) / (2 * CELL);
-                    mb.vert({wx, h, wz}, nrm, terrainColor(m, wx, wz, h, slope));
+                    // Texture blend weights from biome / road / water
+                    Biome bio = m.biomeAt(wx, wz);
+                    float wg = 0, ws = 0, wsn = 0, wr = 0;
+                    switch (bio) {
+                        case Biome::Snow: wsn = 1; break;
+                        case Biome::Desert: case Biome::Beach: ws = 1; break;
+                        case Biome::City: case Biome::Volcanic: wr = 1; break;
+                        default: wg = 1; break;
+                    }
+                    int rx = std::min(HM_N - 1, ix), rz = std::min(HM_N - 1, iz);
+                    if (m.roadMask[(size_t)rz * HM_N + rx]) { wg = ws = wsn = 0; wr = 1; }
+                    if (h < WATER_LEVEL + 0.6f) { wg = wsn = wr = 0; ws = 1; }
+                    // Baked ambient occlusion: valleys and creases are darker
+                    float avg = 0;
+                    int cnt = 0;
+                    for (int oz = -3; oz <= 3; oz += 3)
+                        for (int ox = -3; ox <= 3; ox += 3) {
+                            avg += m.vertexHeight(clampf(ix + ox, 0, HM_N), clampf(iz + oz, 0, HM_N));
+                            cnt++;
+                        }
+                    avg /= cnt;
+                    float ao = clampf(1.0f - std::max(0.0f, avg - h) * 0.08f, 0.5f, 1.0f);
+                    mb.vertT({wx, h, wz}, nrm, terrainColor(m, wx, wz, h, slope), ao, wg, ws, wsn, wr);
                 }
             for (int z = 0; z < CH; z++)
                 for (int x = 0; x < CH; x++) {
@@ -470,7 +551,8 @@ void WorldRenderer::buildTerrain() {
             mb.flush();
             for (auto& mesh : mb.done) {
                 Model model = LoadModelFromMesh(mesh);
-                model.materials[0].shader = light_->shader;
+                model.materials[0].shader = light_->terrain;
+                model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = light_->atlas;
                 terrain_.push_back(model);
                 terrainCenters_.push_back({(cx + CH / 2) * CELL, 10, (cz + CH / 2) * CELL});
             }
@@ -482,7 +564,8 @@ void WorldRenderer::buildTerrain() {
     wb.quad({-E, WATER_LEVEL, -E}, {-E, WATER_LEVEL, E}, {E, WATER_LEVEL, E}, {E, WATER_LEVEL, -E}, {0, 1, 0}, Color{50, 125, 185, 255});
     wb.flush();
     water_ = LoadModelFromMesh(wb.done[0]);
-    water_.materials[0].shader = light_->shader;
+    water_.materials[0].shader = light_->water;
+    water_.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = light_->heightTex;
 }
 
 void WorldRenderer::buildChunk(Chunk& c, const CollisionWorld& world) {
@@ -491,11 +574,12 @@ void WorldRenderer::buildChunk(Chunk& c, const CollisionWorld& world) {
     MeshBuilder mb;
     for (uint32_t id : c.shapes) {
         const Shape* s = world.shape(id);
-        if (!s || !s->alive) continue;
+        if (!s || !s->alive || s->style == 9) continue; // style 9 = collision only, drawn by its decor
         Color col = C(s->color);
         col.a = 255;
         if (s->style == 1) col = {(unsigned char)std::min(255, col.r + 30), (unsigned char)std::min(255, col.g + 30), (unsigned char)std::min(255, col.b + 30), 255};
         col = jitterColor(col, id, 0.04f);
+        mb.curMat = (float)surfaceFor(*s);
         if (s->kind == ShapeKind::Box) mb.aabb(s->box, col);
         else if (s->kind == ShapeKind::Ramp) mb.rampShape(s->box, s->rampDir, col);
         else {
@@ -510,12 +594,24 @@ void WorldRenderer::buildChunk(Chunk& c, const CollisionWorld& world) {
             const Shape* s = world.shape(d.linkedShape);
             if (!s || !s->alive) { decorDead_[di] = 1; continue; }
         }
+        switch (d.kind) {
+            case DecorKind::Glass: mb.curMat = M_GLASS; break;
+            case DecorKind::Trim: mb.curMat = M_PLASTER; break;
+            case DecorKind::Flower: case DecorKind::Lamp: mb.curMat = M_PLAIN; break;
+            case DecorKind::Cactus: case DecorKind::DeadTree: mb.curMat = M_BARK; break;
+            case DecorKind::Bench: case DecorKind::Crate: case DecorKind::Fence: mb.curMat = M_WOOD; break;
+            case DecorKind::Barrel: case DecorKind::StreetLamp: case DecorKind::Mailbox: case DecorKind::Hydrant: mb.curMat = M_METAL; break;
+            case DecorKind::RoadLine: mb.curMat = M_PLAIN; break;
+            case DecorKind::GrassTuft: mb.curMat = M_LEAVES; break;
+            default: mb.curMat = M_LEAVES; break;
+        }
         addDecor(mb, d);
     }
     mb.flush();
     for (auto& mesh : mb.done) {
         Model model = LoadModelFromMesh(mesh);
         model.materials[0].shader = light_->shader;
+        model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = light_->atlas;
         c.models.push_back(model);
     }
     c.dirty = false;
@@ -548,7 +644,7 @@ void WorldRenderer::buildMinimap() {
     for (auto& s : m.shapes) {
         AABB b = s.box;
         float area = (b.max.x - b.min.x) * (b.max.z - b.min.z);
-        if (area < 3 || s.style == 7 || s.style == 6) continue;
+        if (area < 3 || s.style == 7 || s.style == 6 || s.style == 9) continue;
         int x0 = (int)(b.min.x / WORLD_SIZE * N), x1 = (int)(b.max.x / WORLD_SIZE * N);
         int y0 = (int)(b.min.z / WORLD_SIZE * N), y1 = (int)(b.max.z / WORLD_SIZE * N);
         for (int y = std::max(0, y0); y <= std::min(N - 1, y1); y++)
@@ -566,6 +662,7 @@ void WorldRenderer::build(const GameMap& map, const CollisionWorld& world, Light
     unload();
     map_ = &map;
     light_ = &light;
+    light.setHeightmap(map);
     buildTerrain();
     const auto& shapes = world.staticShapes();
     for (auto& s : shapes) {
@@ -640,9 +737,26 @@ void WorldRenderer::draw(const Camera3D& cam, float viewDist, float) {
     }
 }
 
-void WorldRenderer::drawWater(const Camera3D&, float time) {
-    float a = 0.78f + 0.04f * std::sin(time * 0.7f);
-    DrawModel(water_, {0, 0, 0}, 1.0f, Color{255, 255, 255, (unsigned char)(a * 255)});
+void WorldRenderer::drawNear(const Vector3& center, float radius, Shader override) {
+    auto near = [&](const Vector3& c, float r) {
+        float dx = c.x - center.x, dz = c.z - center.z;
+        return std::sqrt(dx * dx + dz * dz) < radius + r;
+    };
+    auto drawWith = [&](Model& m) {
+        Shader keep = m.materials[0].shader;
+        m.materials[0].shader = override;
+        DrawModel(m, {0, 0, 0}, 1.0f, WHITE);
+        m.materials[0].shader = keep;
+    };
+    for (size_t i = 0; i < terrain_.size(); i++)
+        if (near(terrainCenters_[i], 100)) drawWith(terrain_[i]);
+    for (auto& [k, c] : chunks_)
+        if (near(c.center, 60))
+            for (auto& m : c.models) drawWith(m);
+}
+
+void WorldRenderer::drawWater(const Camera3D&, float) {
+    DrawModel(water_, {0, 0, 0}, 1.0f, WHITE);
 }
 
 } // namespace client

@@ -119,20 +119,28 @@ void GameClient::applySnapshot(const Snapshot& s) {
                 tracers_.push_back({e.a, e.b, 0.07f, c});
                 ItemType t = (ItemType)e.extra;
                 Sfx sfx = Sfx::Rifle;
-                if (t == ItemType::PumpShotgun || t == ItemType::TacticalShotgun) sfx = Sfx::Shotgun;
-                else if (t == ItemType::SMG || t == ItemType::Minigun) sfx = Sfx::Smg;
-                else if (t == ItemType::SniperRifle) sfx = Sfx::Sniper;
+                float pitch = 1.0f;
+                if (t == ItemType::PumpShotgun || t == ItemType::TacticalShotgun || t == ItemType::DoubleBarrel || t == ItemType::HeavyShotgun) sfx = Sfx::Shotgun;
+                else if (t == ItemType::SMG || t == ItemType::Minigun || t == ItemType::CompactSMG) sfx = Sfx::Smg;
+                else if (t == ItemType::SniperRifle || t == ItemType::HuntingRifle) sfx = Sfx::Sniper;
                 else if (t == ItemType::Pistol) sfx = Sfx::Pistol;
+                else if (t == ItemType::HandCannon) { sfx = Sfx::Sniper; pitch = 1.3f; }
+                if (t == ItemType::HeavyRifle) pitch = 0.85f;
+                if (t == ItemType::CompactSMG) pitch = 1.2f;
+                // Muzzle flash and a brief flash light cue
+                si::Vec3 mdir = (e.b - e.a).norm();
+                flashes_.push_back({e.a + mdir * 0.9f, 0.05f});
                 // Only one sound per shot (shotguns emit several tracer effects)
                 static uint16_t lastPlayer = 0xFFFF;
                 static float lastTime = -1;
-                if (!(lastPlayer == e.player && time_ - lastTime < 0.03f)) audio_.play(sfx, vol * (e.player == net_.playerId ? 0.8f : 1.0f));
+                if (!(lastPlayer == e.player && time_ - lastTime < 0.03f)) audio_.play(sfx, vol * (e.player == net_.playerId ? 0.8f : 1.0f), pitch);
                 lastPlayer = e.player;
                 lastTime = time_;
                 break;
             }
             case FX_EXPLOSION:
                 blasts_.push_back({e.a, 0, e.extra == 1 ? 6.0f : 5.0f});
+                shake_ = std::max(shake_, clampf(1.0f - dist / 60.0f, 0.0f, 1.0f) * 0.8f);
                 audio_.play(Sfx::Explosion, vol);
                 for (int i = 0; i < 24; i++) {
                     si::Vec3 v{GetRandomValue(-100, 100) / 20.0f, GetRandomValue(20, 160) / 20.0f, GetRandomValue(-100, 100) / 20.0f};
@@ -475,6 +483,9 @@ void GameClient::updateInterpolation(float dt) {
 void GameClient::updateEffects(float dt) {
     for (auto& t : tracers_) t.t -= dt;
     tracers_.erase(std::remove_if(tracers_.begin(), tracers_.end(), [](const Tracer& t) { return t.t <= 0; }), tracers_.end());
+    for (auto& f : flashes_) f.t -= dt;
+    flashes_.erase(std::remove_if(flashes_.begin(), flashes_.end(), [](const Flash& f) { return f.t <= 0; }), flashes_.end());
+    shake_ = std::max(0.0f, shake_ - dt * 2.5f);
     for (auto& b : blasts_) b.t += dt;
     blasts_.erase(std::remove_if(blasts_.begin(), blasts_.end(), [](const Blast& b) { return b.t > 0.6f; }), blasts_.end());
     for (auto& p : particles_) {
@@ -690,13 +701,34 @@ void GameClient::render3D() {
         cam_.target = V(rig.pos + rig.dir * 10.0f);
     }
     cam_.fovy = lerpf(cam_.fovy, fov, 0.25f);
+    if (shake_ > 0) {
+        float a = shake_ * shake_ * 0.35f;
+        si::Vec3 j{std::sin(time_ * 61.0f) * a, std::sin(time_ * 47.0f + 1.0f) * a, std::cos(time_ * 53.0f) * a};
+        cam_.position = V(S(cam_.position) + j);
+        cam_.target = V(S(cam_.target) + j);
+    }
 
-    // Sky gradient
-    int W = GetScreenWidth(), H = GetScreenHeight();
-    DrawRectangleGradientV(0, 0, W, H, Color{92, 160, 230, 255}, Color{190, 222, 246, 255});
+    // --- Shadow pass (sun depth map around the view focus)
+    light_.shadows = settings_.shadows;
+    si::Vec3 shadowFocus = viewPos();
+    if (haveSelf_ && self_.mode == MoveMode::OnBus) shadowFocus = lerp3(g_.busStart, g_.busEnd, clampf(g_.busProgress, 0, 1));
+    if (light_.shadows) {
+        light_.beginShadowPass(V(shadowFocus));
+        worldR_.drawNear(V(shadowFocus), light_.shadowRadius * 1.4f, light_.depth);
+        BeginShaderMode(light_.depth);
+        renderStructures();
+        renderPlayers();
+        renderBus();
+        EndShaderMode();
+        light_.endObjects();
+        light_.endShadowPass();
+    }
+
+    // --- Main pass
+    light_.drawSky(cam_, time_);
     BeginMode3D(cam_);
     rlSetClipPlanes(0.1, 3000.0);
-    light_.begin(cam_.position);
+    light_.begin(cam_, time_);
     worldR_.draw(cam_, settings_.viewDistance, time_);
     BeginShaderMode(light_.shader);
     renderStructures();
@@ -704,6 +736,7 @@ void GameClient::render3D() {
     renderPlayers();
     renderBus();
     EndShaderMode();
+    light_.endObjects();
     worldR_.drawWater(cam_, time_);
     renderSlipstreams();
     renderEffects();
@@ -718,6 +751,7 @@ void GameClient::renderStructures() {
     for (auto& [id, s] : structures_.byId) {
         AABB b = pieceBounds(s.piece, s.gx, s.gy, s.gz, s.rot);
         if ((b.center() - cp).lenXZ() > settings_.viewDistance) continue;
+        setDrawMaterial(s.mat == si::Material::Wood ? M_WOOD : s.mat == si::Material::Brick ? M_BRICK : M_METAL);
         Color c = materialColor(s.mat);
         float hpF = s.maxHp > 0 ? clampf(s.hp / s.maxHp, 0.25f, 1.0f) : 1.0f;
         float f = 0.65f + 0.35f * hpF;
@@ -744,6 +778,7 @@ void GameClient::renderStructures() {
         }
     }
     // Launch pads
+    setDrawMaterial(M_METAL);
     for (auto& lp : launchPads_) {
         drawAABB(AABB(lp + si::Vec3{-1.2f, 0, -1.2f}, lp + si::Vec3{1.2f, 0.2f, 1.2f}), Color{60, 60, 70, 255});
         drawAABB(AABB(lp + si::Vec3{-0.9f, 0.2f, -0.9f}, lp + si::Vec3{0.9f, 0.28f, 0.9f}), Color{240, 180, 40, 255});
@@ -758,6 +793,7 @@ void GameClient::renderItems() {
         const si::Vec3& p = map_.chests[i].pos;
         if ((p - cp).lenXZ() > 150) continue;
         Basis cb = yawBasis(map_.chests[i].yaw);
+        setDrawMaterial(M_WOOD);
         float glow = 0.5f + 0.5f * std::sin(time_ * 3.0f + i);
         drawBox(p + si::Vec3{0, 0.32f, 0}, {0.55f, 0.32f, 0.35f}, cb, Color{150, 95, 40, 255});                     // wooden body
         drawBox(p + si::Vec3{0, 0.72f, 0}, {0.56f, 0.1f, 0.36f}, cb, Color{165, 105, 45, 255});                     // lid
@@ -778,6 +814,7 @@ void GameClient::renderItems() {
         for (int k = -1; k <= 1; k += 2) drawBox(p + si::Vec3{0.47f * k, 0.3f, 0}, {0.02f, 0.05f, 0.12f}, Basis(), Color{50, 60, 45, 255});
     }
     // Floor items
+    setDrawMaterial(M_PLAIN);
     for (auto& [id, it] : items_) {
         if ((it.pos - cp).lenXZ() > 90) continue;
         float bob = 0.3f + std::sin(time_ * 2.0f + id) * 0.08f;
@@ -808,7 +845,14 @@ void GameClient::renderItems() {
     // Projectiles
     for (auto& pr : projectiles_) {
         Color c = pr.type == (uint8_t)ItemType::RocketLauncher ? Color{220, 220, 220, 255} : C(itemDef((ItemType)pr.type).color);
-        drawBox(pr.pos, {0.15f, 0.15f, 0.15f}, yawBasis(time_ * 8), c);
+        if (pr.type == (uint8_t)ItemType::Crossbow) {
+            drawBox(pr.pos, {0.02f, 0.02f, 0.35f}, yawBasis(time_), Color{210, 200, 180, 255});
+        } else if (pr.type == (uint8_t)ItemType::StickyCharge) {
+            drawBox(pr.pos, {0.14f, 0.08f, 0.14f}, Basis(), c);
+            if (std::fmod(time_, 0.4f) < 0.2f) drawBox(pr.pos + si::Vec3{0, 0.1f, 0}, {0.04f, 0.03f, 0.04f}, Basis(), Color{255, 60, 40, 255});
+        } else {
+            drawBox(pr.pos, {0.15f, 0.15f, 0.15f}, yawBasis(time_ * 8), c);
+        }
         if (pr.type == (uint8_t)ItemType::RocketLauncher && GetRandomValue(0, 1))
             particles_.push_back({pr.pos, {0, 0.5f, 0}, 0, 0.8f, Color{120, 120, 120, 255}, 0.25f});
     }
@@ -858,6 +902,7 @@ void GameClient::renderBus() {
     // Airship (original design): rounded envelope, striped band, gondola with windows,
     // four tail fins and two engine pods with spinning propellers.
     Color env{70, 130, 220, 255}, env2{84, 146, 234, 255}, stripe{245, 245, 250, 255}, trim{230, 200, 90, 255};
+    setDrawMaterial(M_FABRIC);
     si::Vec3 c = p + si::Vec3{0, 6, 0};
     const int N = 13;
     for (int i = 0; i < N; i++) {
@@ -878,6 +923,7 @@ void GameClient::renderBus() {
     drawBox(c - b.f * 8.3f + b.r * 2.6f, {1.5f, 0.12f, 1.4f}, b, fin);
     drawBox(c - b.f * 8.3f - b.r * 2.6f, {1.5f, 0.12f, 1.4f}, b, fin);
     // Gondola with windows and a railing deck
+    setDrawMaterial(M_METAL);
     si::Vec3 g = p + si::Vec3{0, 1.7f, 0};
     drawBox(g, {1.6f, 1.1f, 4.4f}, b, trim);
     drawBox(g - b.u * 1.15f, {1.7f, 0.1f, 4.6f}, b, darker4(trim));
@@ -939,6 +985,11 @@ void GameClient::renderEffects() {
         Color c = p.c;
         c.a = (unsigned char)(255 * clampf(1 - p.t / p.life, 0, 1));
         DrawCube(V(p.p), p.size, p.size, p.size, c);
+    }
+    for (auto& f : flashes_) {
+        float k = f.t / 0.05f;
+        DrawSphere(V(f.p), 0.12f + 0.12f * k, Color{255, 230, 150, (unsigned char)(230 * k)});
+        DrawSphere(V(f.p), 0.28f * k, Color{255, 170, 60, (unsigned char)(90 * k)});
     }
     for (auto& b : blasts_) {
         float k = b.t / 0.6f;

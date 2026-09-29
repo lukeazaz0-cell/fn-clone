@@ -42,7 +42,8 @@ struct Vent {
     float radius = 3.0f;
 };
 
-enum class DecorKind : uint8_t { PineTree = 0, OakTree, PalmTree, JungleTree, Bush, Cactus, Flower, Lamp, Crop, SnowPine, DeadTree, Glass, Trim, Count };
+enum class DecorKind : uint8_t { PineTree = 0, OakTree, PalmTree, JungleTree, Bush, Cactus, Flower, Lamp, Crop, SnowPine, DeadTree, Glass, Trim,
+                                 Bench, Crate, Fence, Barrel, StreetLamp, Mailbox, Hydrant, RoadLine, GrassTuft, Count };
 
 struct Decor {
     DecorKind kind;
@@ -50,7 +51,8 @@ struct Decor {
     float scale = 1.0f;
     uint32_t linkedShape = INVALID_ID; // disappears when this shape is destroyed
     Color4 color;
-    Vec3 size;                         // half extents for Glass / Trim boxes
+    Vec3 size;                         // half extents for Glass / Trim / RoadLine boxes
+    float yaw = 0;                     // orientation for props
 };
 
 struct Road { Vec2 a, b; float width; };
@@ -124,6 +126,11 @@ private:
     void addLoot(const Vec3& p);
     void addTree(DecorKind k, float x, float z, float scale);
     void addBoxDecor(DecorKind k, const AABB& b, Color4 c, uint32_t link);
+    void addProp(DecorKind k, float x, float z, float yaw, Color4 c, uint32_t link = INVALID_ID);
+    void barrel(float x, float z, Color4 c);
+    void crate(float x, float z, float size);
+    void propCluster(float cx, float cz, float radius, int count);
+    void genStreetProps();
 
     void buildPoi(POI& p);
 };

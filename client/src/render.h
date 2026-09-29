@@ -18,15 +18,49 @@ inline Vector3 V(const si::Vec3& v) { return {v.x, v.y, v.z}; }
 inline si::Vec3 S(const Vector3& v) { return {v.x, v.y, v.z}; }
 inline Color C(const Color4& c) { return {c.r, c.g, c.b, c.a}; }
 
+// Surface materials: index into the procedural detail-texture atlas (4x4 tiles).
+enum SurfMat : int {
+    M_PLAIN = 0, M_GRASS, M_ROCK, M_SAND, M_SNOW, M_WOOD, M_BRICK, M_METAL,
+    M_PLASTER, M_ROOF, M_GLASS, M_FABRIC, M_BARK, M_LEAVES, M_ASPHALT, M_TILE
+};
+
+// Material used by the immediate-mode primitive helpers below.
+void setDrawMaterial(int m);
+int drawMaterial();
+
+// Renderer state: shaders (objects, terrain, water, sky, shadow depth), the procedural
+// texture atlas, the terrain heightmap texture used by water, and the sun shadow map.
 struct Lighting {
-    Shader shader{};
-    int locViewPos = -1, locSunDir = -1, locFogColor = -1, locFogDensity = -1, locModel = -1, locNormal = -1, locTint = -1;
-    Color fogColor = {168, 206, 240, 255};
-    float fogDensity = 0.0016f;
+    Shader shader{};      // lit objects (models + immediate-mode primitives)
+    Shader terrain{};
+    Shader water{};
+    Shader sky{};
+    Shader depth{};       // shadow pass
+    Texture2D atlas{};
+    Texture2D heightTex{};
+    unsigned int shadowFbo = 0;
+    Texture2D shadowDepth{};
+    int shadowSize = 2048;
+    float shadowRadius = 95.0f;
+    bool shadows = true;
+    bool inShadowPass = false;
+    Matrix lightVP{};
+    Vector3 sunDir{};
+    Color fogColor = {182, 208, 236, 255};
+    float fogDensity = 0.0009f;
+    float exposure = 0.82f;
+
     void load();
     void unload();
-    void begin(const Vector3& camPos);
-    void setTint(Color c);
+    void setHeightmap(const GameMap& map);
+    // Uploads per-frame uniforms to every shader and binds the shadow map.
+    void begin(const Camera3D& cam, float time);
+    // Renders into the shadow map from the sun around `focus`. Draw casters between begin/end.
+    void beginShadowPass(const Vector3& focus);
+    void endShadowPass();
+    void drawSky(const Camera3D& cam, float time);
+    // Call after immediate-mode drawing so later raylib draws don't sample the atlas.
+    void endObjects();
 };
 
 // Oriented box / pyramid helpers usable inside BeginShaderMode (world-space normals).
@@ -49,6 +83,8 @@ public:
     void markAllDirty();
     void rebuildDirty(const CollisionWorld& world, int maxPerFrame = 3);
     void draw(const Camera3D& cam, float viewDist, float time);
+    // Draws terrain + props within `radius` of `center` with the given shader (shadow pass).
+    void drawNear(const Vector3& center, float radius, Shader override);
     void drawWater(const Camera3D& cam, float time);
     Texture2D minimap{};
     int minimapSize = 512;
