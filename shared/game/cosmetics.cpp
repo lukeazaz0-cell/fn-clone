@@ -22,6 +22,8 @@ std::vector<CosmeticDef> build() {
     add("outfit_recruit_a", "Recruit Alpha", CT::Outfit, R::Common, 0, 0, st(rgb(70, 90, 140), rgb(50, 50, 60), rgb(200, 200, 210), tone1, rgb(90, 60, 30)));
     add("outfit_recruit_b", "Recruit Bravo", CT::Outfit, R::Common, 0, 0, st(rgb(140, 80, 60), rgb(60, 60, 50), rgb(220, 200, 150), tone3, rgb(20, 20, 20)));
     add("outfit_recruit_c", "Recruit Charlie", CT::Outfit, R::Common, 0, 0, st(rgb(80, 130, 80), rgb(70, 60, 50), rgb(230, 230, 230), tone2, rgb(200, 160, 60)));
+    // Model-based outfit (CC0 rigged soldier by Kenney); shape 10 = draw the soldier model file
+    add("outfit_arena_trooper", "Arena Trooper", CT::Outfit, R::Rare, 0, 0, st(rgb(200, 90, 60), rgb(90, 90, 100), rgb(240, 200, 80), tone1, rgb(60, 40, 30), 10));
     // Shop / level outfits (original characters)
     add("outfit_ember_ranger", "Ember Ranger", CT::Outfit, R::Rare, 1200, 0, st(rgb(200, 70, 30), rgb(60, 30, 20), rgb(255, 190, 60), tone2, rgb(150, 40, 20), 2, 1));
     add("outfit_tidecaller", "Tidecaller", CT::Outfit, R::Epic, 1500, 0, st(rgb(30, 120, 170), rgb(20, 60, 90), rgb(120, 230, 230), tone4, rgb(20, 90, 110), 4, 2));

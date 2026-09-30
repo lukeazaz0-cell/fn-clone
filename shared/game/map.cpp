@@ -666,9 +666,87 @@ void GameMap::container(float x, float z, bool alongX, Color4 c) {
 void GameMap::car(float x, float z, bool alongX, Color4 c) {
     float lx = alongX ? 4.2f : 1.9f, lz = alongX ? 1.9f : 4.2f;
     float base = heightAt(x, z);
-    box({x - lx / 2, base + 0.3f, z - lz / 2}, {x + lx / 2, base + 1.15f, z + lz / 2}, Material::Metal, c, 300, true, 4);
+    // Style 11: collision boxes that the client replaces with a truck model when available.
+    uint32_t body = box({x - lx / 2, base + 0.3f, z - lz / 2}, {x + lx / 2, base + 1.15f, z + lz / 2}, Material::Metal, c, 300, true, 11);
     float cx2 = alongX ? 2.2f : 1.7f, cz2 = alongX ? 1.7f : 2.2f;
-    box({x - cx2 / 2, base + 1.15f, z - cz2 / 2}, {x + cx2 / 2, base + 1.8f, z + cz2 / 2}, Material::Metal, shade(c, 0.8f), 200, true, 1);
+    box({x - cx2 / 2, base + 1.15f, z - cz2 / 2}, {x + cx2 / 2, base + 1.8f, z + cz2 / 2}, Material::Metal, shade(c, 0.8f), 200, true, 11);
+    Decor d;
+    d.kind = DecorKind::Model;
+    d.model = (PropModel)((int)PropModel::TruckGreen + rng_.irange(0, 3));
+    d.pos = {x, base, z};
+    d.yaw = (alongX ? kPi / 2 : 0.0f) + (rng_.chance(0.5f) ? kPi : 0.0f);
+    d.scale = 1.5f;
+    d.color = c;
+    d.linkedShape = body;
+    decor.push_back(d);
+}
+
+void GameMap::modelProp(PropModel m, float x, float z, float yaw, float scale, Vec3 colHalf, float hp, bool linkCollision) {
+    float y = heightAt(x, z);
+    uint32_t id = INVALID_ID;
+    if (colHalf.x > 0) id = box({x - colHalf.x, y - 0.2f, z - colHalf.z}, {x + colHalf.x, y + colHalf.y * 2, z + colHalf.z}, Material::Brick,
+                               rgb(180, 180, 180), hp > 0 ? hp : 400, hp > 0, 11);
+    Decor d;
+    d.kind = DecorKind::Model;
+    d.model = m;
+    d.pos = {x, y, z};
+    d.yaw = yaw;
+    d.scale = scale;
+    d.color = rgb(200, 200, 200);
+    d.linkedShape = linkCollision ? id : INVALID_ID;
+    decor.push_back(d);
+}
+
+void GameMap::genLandmarkProps() {
+    for (auto& p : pois) {
+        float cx = p.center.x, cz = p.center.y;
+        switch (p.type) {
+            case PoiType::FutureCity:
+                for (int i = 0; i < 4; i++) {
+                    float a = i * kPi / 2;
+                    modelProp(PropModel::Statue, cx + std::cos(a) * 11, cz + std::sin(a) * 11, a + kPi, 2.4f, {0.8f, 1.6f, 0.8f});
+                }
+                break;
+            case PoiType::Suburb:
+                modelProp(PropModel::Fountain, cx + 9, cz - 9, 0, 7.0f, {3.2f, 0.9f, 3.2f});
+                break;
+            case PoiType::SmallTown:
+            case PoiType::Hamlet:
+                modelProp(PropModel::Fountain, cx - 6, cz - 6, 0, 6.0f, {2.8f, 0.8f, 2.8f});
+                break;
+            case PoiType::Temple:
+                for (int i = 0; i < 8; i++) {
+                    float a = i * kPi / 4;
+                    modelProp(PropModel::Column, cx + std::cos(a) * 24, cz + std::sin(a) * 24, 0, 4.0f, {1.1f, 2.0f, 1.1f}, 600);
+                }
+                break;
+            case PoiType::Mansion:
+                modelProp(PropModel::Statue, cx - 8, cz - 12, 0, 3.0f, {1.0f, 2.0f, 1.0f});
+                modelProp(PropModel::Statue, cx + 8, cz - 12, 0, 3.0f, {1.0f, 2.0f, 1.0f});
+                modelProp(PropModel::Banner, cx - 4, cz - 7, 0, 3.0f, {0, 0, 0});
+                modelProp(PropModel::Banner, cx + 4, cz - 7, 0, 3.0f, {0, 0, 0});
+                break;
+            case PoiType::LanternVillage:
+                for (int i = 0; i < 6; i++) {
+                    float a = i * kPi / 3 + 0.3f;
+                    modelProp(PropModel::Banner, cx + std::cos(a) * 16, cz + std::sin(a) * 16, a + kPi / 2, 3.0f, {0, 0, 0});
+                }
+                break;
+            case PoiType::Industrial:
+            case PoiType::Airfield:
+                for (int i = 0; i < 3; i++) modelProp(PropModel::WeaponRack, cx - 12 + i * 3.5f, cz - 2, 0, 2.2f, {0.8f, 0.5f, 0.35f}, 150);
+                break;
+            default: break;
+        }
+        // A flag marks the centre of every named location
+        if (p.major) modelProp(PropModel::Flag, cx + p.radius * 0.35f, cz + p.radius * 0.35f, 0.4f, 4.0f, {0.25f, 2.4f, 0.25f}, 150);
+    }
+    // Motorcycles parked around the island
+    for (int i = 0; i < 18; i++) {
+        Vec3 pt = randomLandPoint(rng_, 150);
+        if (pt.y > 30) continue;
+        modelProp(PropModel::Motorcycle, pt.x, pt.z, rng_.range(0, 2 * kPi), 1.5f, {0.5f, 0.9f, 1.0f}, 200);
+    }
 }
 
 void GameMap::pagoda(float cx, float cz, int levels) {
@@ -1255,7 +1333,22 @@ void GameMap::genNature() {
                 default: break;
             }
             if (inTown) density *= 0.25f;
-            if (roll < density) {
+            if (roll < density && (b == Biome::Forest || b == Biome::Grass || b == Biome::Snow) && rng_.chance(0.12f)) {
+                // Model-based tree variety (trunk collision stays a harvestable shape)
+                float sc = rng_.range(3.2f, 4.4f);
+                uint32_t trunk = box({px - 0.35f, h - 0.3f, pz - 0.35f}, {px + 0.35f, h + 2.2f, pz + 0.35f}, Material::Wood, rgb(100, 70, 45), 200, true, 11);
+                Decor d;
+                d.kind = DecorKind::Model;
+                d.model = b == Biome::Grass && rng_.chance(0.4f) ? PropModel::TreeCluster : PropModel::PineModel;
+                d.pos = {px, h, pz};
+                d.yaw = rng_.range(0, 2 * kPi);
+                d.scale = d.model == PropModel::TreeCluster ? sc * 1.8f : sc;
+                d.color = rgb(60, 130, 70);
+                d.linkedShape = trunk;
+                decor.push_back(d);
+                int ix = (int)(px / 2), iz = (int)(pz / 2);
+                occ[(size_t)iz * ON + ix] = 1;
+            } else if (roll < density) {
                 addTree(kind, px, pz, rng_.range(0.8f, 1.4f));
                 // mark occupied
                 int ix = (int)(px / 2), iz = (int)(pz / 2);
@@ -1323,6 +1416,7 @@ void GameMap::generate(uint32_t s) {
     genRoads();
     genPois();
     genBiomes(); // refresh after flattening
+    genLandmarkProps();
     genNature();
     genStreetProps();
     genSlipstreams();

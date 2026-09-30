@@ -265,6 +265,7 @@ void App::joinMatch(const std::string& host, uint16_t port, const std::string& t
 void App::leaveMatch() {
     net_.disconnect();
     game_.reset();
+    models_.useShader(previewLight_.model);
     stopOffline();
     ui::setMouseCaptured(false);
     screen_ = Screen::Lobby;
@@ -284,6 +285,8 @@ void App::run() {
     audio_.init();
     audio_.masterVolume = settings_.volume;
     previewLight_.load();
+    models_.load(previewLight_);
+    setModels(&models_);
     if (!api_.token.empty()) fMe_ = api_.get("/api/me");
 
     // Scripted run used for screenshots and smoke tests: STORM_AUTOTEST=1
@@ -292,7 +295,7 @@ void App::run() {
     float autoT = 0;
     int autoShot = 0;
     const float shotTimes[] = {1.0f, 9.0f, 16.0f, 24.0f, 32.0f, 42.0f, 55.0f, 70.0f};
-    if (settings_.autotest) { offline_ = true; screen_ = Screen::Lobby; offlineBots_ = 40; offlineDiff_ = 1; }
+    if (settings_.autotest) { offline_ = true; screen_ = Screen::Lobby; offlineBots_ = 40; offlineDiff_ = 1; offlineLoadout_.outfit = "outfit_arena_trooper"; }
 
     while (!WindowShouldClose() && !quit_) {
         float dt = std::min(GetFrameTime(), 0.1f);
@@ -338,6 +341,8 @@ void App::run() {
     // GPU/audio resources must be released while the window/context still exists.
     if (previewRT_.id) UnloadRenderTexture(previewRT_);
     previewRT_ = {};
+    setModels(nullptr);
+    models_.unload();
     previewLight_.unload();
     audio_.shutdown();
     ui::unloadFonts();

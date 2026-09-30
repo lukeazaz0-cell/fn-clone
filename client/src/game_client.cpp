@@ -1,5 +1,7 @@
 #include "game_client.h"
 
+#include "models.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -19,12 +21,15 @@ float angleLerp(float a, float b, float t) { return a + wrapAngle(b - a) * t; }
 
 GameClient::GameClient(NetClient& net, Settings& settings, AudioSystem& audio) : net_(net), settings_(settings), audio_(audio) {
     light_.load();
+    if (models()) models()->useShader(light_.model);
     cam_.up = {0, 1, 0};
     cam_.fovy = settings_.fov;
     cam_.projection = CAMERA_PERSPECTIVE;
 }
 
 GameClient::~GameClient() {
+    audio_.loop(Loop::Engine, 0);
+    audio_.loop(Loop::Ambience, 0);
     worldR_.unload();
     light_.unload();
     ui::setMouseCaptured(false);
@@ -37,6 +42,16 @@ void GameClient::initMap(uint32_t seed) {
     chestOpened_.assign(map_.chests.size(), 0);
     ammoBoxOpened_.assign(map_.ammoBoxes.size(), 0);
     mapReady_ = true;
+    // Drifting clouds (CC0 cloud model), deterministic per map
+    Rng cr(seed ^ 0xC10D, 9);
+    clouds_.clear();
+    for (int i = 0; i < 46; i++) {
+        Cloud c;
+        c.pos = {cr.range(-300, WORLD_SIZE + 300), cr.range(190, 270), cr.range(-300, WORLD_SIZE + 300)};
+        c.size = {cr.range(40, 90), cr.range(14, 26), cr.range(30, 70)};
+        c.speed = cr.range(1.5f, 4.0f);
+        clouds_.push_back(c);
+    }
 }
 
 std::string GameClient::playerName(uint16_t id) const {
@@ -126,6 +141,10 @@ void GameClient::applySnapshot(const Snapshot& s) {
                 else if (t == ItemType::Pistol) sfx = Sfx::Pistol;
                 else if (t == ItemType::HandCannon) { sfx = Sfx::Sniper; pitch = 1.3f; }
                 if (t == ItemType::HeavyRifle) pitch = 0.85f;
+                if (models() && models()->hasHeld(HeldModel::Blaster)) {
+                    if (t == ItemType::Pistol) { sfx = Sfx::Blaster; pitch = 1.0f; }
+                    if (t == ItemType::CompactSMG) { sfx = Sfx::BlasterRepeater; pitch = 1.0f; }
+                }
                 if (t == ItemType::CompactSMG) pitch = 1.2f;
                 // Muzzle flash and a brief flash light cue
                 si::Vec3 mdir = (e.b - e.a).norm();
@@ -155,6 +174,7 @@ void GameClient::applySnapshot(const Snapshot& s) {
                     particles_.push_back({e.a, v, 0, 0.6f, c, 0.12f});
                 }
                 if (e.type == FX_HARVEST) audio_.play(Sfx::Pickaxe, vol, 0.9f + GetRandomValue(0, 20) / 100.0f);
+                else if (vol > 0.5f) audio_.play(Sfx::Impact, vol * 0.25f, 1.4f);
                 break;
             }
             case FX_BUILD: audio_.play(Sfx::Build, vol * 0.7f); break;
@@ -190,7 +210,7 @@ void GameClient::reconcile(const Snapshot& s) {
     predInit_ = true;
 }
 
-void GameClient::stepPrediction(const InputCmd& in) {
+MoveEvents GameClient::stepPrediction(const InputCmd& in) {
     MoveInput mi;
     mi.yaw = in.yaw;
     mi.pitch = in.pitch;
@@ -207,7 +227,7 @@ void GameClient::stepPrediction(const InputCmd& in) {
     if (self_.action == ACT_REVIVE) mp.rooted = true;
     if (self_.selected >= 1 && self_.selected <= 5 && self_.inv[self_.selected - 1].type == ItemType::Minigun) mp.speedMul = 0.85f;
     if ((self_.flags & PF_EMOTING) && !mi.fwd && !mi.right && !(mi.buttons & (IN_FIRE | IN_JUMP))) { mi.fwd = mi.right = 0; }
-    stepMovement(pred_, mi, world_, map_, SIM_DT, mp);
+    return stepMovement(pred_, mi, world_, map_, SIM_DT, mp);
 }
 
 void GameClient::handleEvent(const std::vector<uint8_t>& ev) {
@@ -249,6 +269,8 @@ void GameClient::handleEvent(const std::vector<uint8_t>& ev) {
             uint32_t id = r.u32();
             if (Structure* s = structures_.find(id)) {
                 AABB b = pieceBounds(s->piece, s->gx, s->gy, s->gz, s->rot);
+                float d = (b.center() - me).len();
+                if (d < 60) audio_.play(Sfx::StructureBreak, clampf(1.0f - d / 60.0f, 0, 1) * 0.8f);
                 Color c = materialColor(s->mat);
                 for (int i = 0; i < 10; i++) {
                     si::Vec3 p{GetRandomValue((int)(b.min.x * 10), (int)(b.max.x * 10)) / 10.0f, GetRandomValue((int)(b.min.y * 10), (int)(b.max.y * 10)) / 10.0f,
@@ -260,6 +282,7 @@ void GameClient::handleEvent(const std::vector<uint8_t>& ev) {
             break;
         }
         case EV_STRUCT_EDIT: {
+            audio_.play(Sfx::Click, 0.4f);
             uint32_t id = r.u32();
             uint8_t e = r.u8();
             structures_.setEdit(id, e, world_);
@@ -426,7 +449,18 @@ void GameClient::sampleInput(float) {
         }
     }
     if (localControllable()) {
-        stepPrediction(in);
+        MoveEvents ev = stepPrediction(in);
+        if (ev.jumped) audio_.play(Sfx::Jump, 0.45f);
+        if (ev.landed) audio_.play(Sfx::Land, 0.6f);
+        // Footsteps from the locally predicted movement
+        float spd = pred_.vel.lenXZ();
+        if (pred_.onGround && spd > 1.0f) {
+            stepTimer_ -= SIM_DT * spd;
+            if (stepTimer_ <= 0) {
+                audio_.play(Sfx::Footstep, pred_.crouched ? 0.15f : 0.32f, spd > 7 ? 1.1f : 1.0f);
+                stepTimer_ = 2.1f;
+            }
+        }
         pendingInputs_.push_back(in);
         while (pendingInputs_.size() > 240) pendingInputs_.pop_front();
     }
@@ -467,6 +501,14 @@ void GameClient::updateInterpolation(float dt) {
         p.speed = lerpf(p.speed, dt > 0 ? moved / dt : 0, 0.3f);
         p.lastPos = p.cur.pos;
         p.animTime += dt;
+        if (id != net_.playerId && p.present && p.cur.mode == MoveMode::Ground && p.speed > 1.0f && (p.cur.flags & PF_ALIVE)) {
+            p.stepTimer -= dt * p.speed;
+            if (p.stepTimer <= 0) {
+                float d = (p.cur.pos - viewPos()).len();
+                if (d < 30) audio_.play(Sfx::Footstep, 0.35f * (1.0f - d / 30.0f));
+                p.stepTimer = 2.1f;
+            }
+        }
         if (p.cur.flags & PF_HARVESTING) p.swing = std::fmod(p.swing + dt * 2.0f, 1.0f);
         else p.swing = 0;
         if (p.cur.mode == MoveMode::Skydive || p.cur.mode == MoveMode::Glide) {
@@ -593,7 +635,7 @@ bool GameClient::frame(float dt) {
         }
         if (localControllable()) {
             for (int k = 0; k < 5; k++)
-                if (IsKeyPressed(KEY_ONE + k)) { pushAction(ActionType::SelectSlot, (uint8_t)(k + 1)); audio_.play(Sfx::Click, 0.3f); }
+                if (IsKeyPressed(KEY_ONE + k)) pushAction(ActionType::SelectSlot, (uint8_t)(k + 1));
             if (IsKeyPressed(KEY_F)) pushAction(ActionType::SelectSlot, 0);
             float wheel = GetMouseWheelMove();
             if (wheel != 0 && !self_.buildMode) {
@@ -649,6 +691,21 @@ bool GameClient::frame(float dt) {
             stormTickSound_ -= dt;
             if (stormTickSound_ <= 0) { audio_.play(Sfx::Storm, 0.4f); stormTickSound_ = 1.0f; }
         }
+    }
+
+    // Looping ambience: engine of the drop ship, outdoor ambience
+    if (g_.busActive) {
+        si::Vec3 bus = lerp3(g_.busStart, g_.busEnd, clampf(g_.busProgress, 0, 1));
+        float d = (bus - S(cam_.position)).len();
+        audio_.loop(Loop::Engine, clampf(1.0f - d / 400.0f, 0, 1) * 0.55f, 0.7f);
+    } else {
+        audio_.loop(Loop::Engine, 0);
+    }
+    audio_.loop(Loop::Ambience, 0.22f);
+    // Weapon switch click
+    if (haveSelf_ && (int)self_.selected != lastSlotSound_) {
+        if (lastSlotSound_ >= 0) audio_.play(Sfx::WeaponSwitch, 0.5f);
+        lastSlotSound_ = self_.selected;
     }
 
     render3D();
@@ -730,6 +787,24 @@ void GameClient::render3D() {
     rlSetClipPlanes(0.1, 3000.0);
     light_.begin(cam_, time_);
     worldR_.draw(cam_, settings_.viewDistance, time_);
+    if (ModelLibrary* lib = models()) {
+        if (lib->hasHeld(HeldModel::Cloud)) {
+            for (auto& c : clouds_) {
+                si::Vec3 p = c.pos + si::Vec3{std::fmod(time_ * c.speed, WORLD_SIZE + 600), 0, 0};
+                if (p.x > WORLD_SIZE + 300) p.x -= WORLD_SIZE + 600;
+                Basis b;
+                b.r = {c.size.x, 0, 0};
+                b.u = {0, c.size.y, 0};
+                b.f = {0, 0, c.size.z};
+                lib->drawHeld(HeldModel::Cloud, p, b, 1.0f);
+            }
+        }
+        // Victory trophy floating in front of the camera
+        if (result_.has && result_.won && lib->hasHeld(HeldModel::Trophy)) {
+            si::Vec3 fwd = (S(cam_.target) - S(cam_.position)).norm();
+            lib->drawHeld(HeldModel::Trophy, S(cam_.position) + fwd * 3.0f + si::Vec3{0, -0.55f, 0}, yawBasis(time_ * 1.5f), 1.6f);
+        }
+    }
     BeginShaderMode(light_.shader);
     renderStructures();
     renderItems();

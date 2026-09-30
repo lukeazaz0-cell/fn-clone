@@ -2,6 +2,7 @@
 // the colors/shape knobs in shared/game/cosmetics.cpp.
 #include <cmath>
 
+#include "models.h"
 #include "render.h"
 #include "rlgl.h"
 #include "shared/game/items.h"
@@ -213,7 +214,16 @@ void drawHeldItem(const si::Vec3& hand, const Basis& b, uint8_t type, uint8_t ra
     const ItemDef& d = itemDef(t);
     Color body = C(d.color);
     Color rc = C(rarityColor((Rarity)rarity));
-    if (d.cls == ItemClass::Gun) {
+    ModelLibrary* lib = models();
+    HeldModel hm = t == ItemType::Pistol ? HeldModel::Blaster : HeldModel::BlasterRepeater;
+    if ((t == ItemType::Pistol || t == ItemType::CompactSMG) && lib && lib->hasHeld(hm)) {
+        // CC0 blaster models; the file's barrel points along -Z, so flip forward/right.
+        Basis mb = b;
+        mb.f = b.f * -1.0f;
+        mb.r = b.r * -1.0f;
+        lib->drawHeld(hm, hand + b.u * -0.06f + b.f * 0.08f, mb, t == ItemType::Pistol ? 0.2f : 0.24f, shadowOverride());
+        drawBox(hand + b.u * 0.12f + b.f * 0.1f, {0.04f, 0.01f, 0.08f}, b, rc); // rarity marker
+    } else if (d.cls == ItemClass::Gun) {
         gunModel(hand, b, t, body, rc);
     } else if (d.cls == ItemClass::Consumable) {
         switch (t) {
@@ -272,8 +282,42 @@ void drawGlider(const si::Vec3& pos, float yaw, const Loadout& l) {
     drawBox(pos + si::Vec3{0, 2.2f, 0}, {0.4f, 0.025f, 0.025f}, b, darker(lc, 0.6f));
 }
 
+static bool drawSoldierCharacter(const CharPose& p, const Loadout& l, float time) {
+    ModelLibrary* lib = models();
+    if (!lib || !lib->hasSoldier()) return false;
+    bool sky = p.mode == MoveMode::Skydive, glide = p.mode == MoveMode::Glide;
+    bool aiming = p.heldType != 0 && itemDef((ItemType)p.heldType).cls == ItemClass::Gun && !sky && !glide;
+    SoldierAnim anim = SoldierAnim::Idle;
+    if (p.flags & PF_DBNO) anim = SoldierAnim::Crouch;
+    else if (sky || glide) anim = SoldierAnim::Fall;
+    else if (p.mode == MoveMode::Air) anim = SoldierAnim::Jump;
+    else if (p.emote) anim = SoldierAnim::Cheer;
+    else if (p.flags & PF_CROUCH) anim = SoldierAnim::Crouch;
+    else if (p.speed > 7.0f) anim = SoldierAnim::Sprint;
+    else if (p.speed > 0.6f) anim = SoldierAnim::Walk;
+    else if (aiming) anim = (p.flags & PF_FIRING) ? SoldierAnim::HoldShoot : SoldierAnim::Hold;
+    float scale = 2.9f;
+    si::Vec3 feet = p.pos;
+    if (sky) feet = feet + si::Vec3{0, 0.4f, 0};
+    lib->drawSoldier(feet, p.yaw, anim, p.animTime, scale, shadowOverride());
+    // Held item: only in the holding poses, where the right hand is extended in front.
+    bool holding = anim == SoldierAnim::Hold || anim == SoldierAnim::HoldShoot || (p.flags & PF_HARVESTING);
+    if (holding && !p.building) {
+        Basis body = yawBasis(p.yaw);
+        si::Vec3 hand = feet + si::Vec3{0, 1.2f, 0} + body.r * 0.36f + body.f * 0.5f;
+        Basis itemB = compose(yawBasis(p.yaw), yawPitchBasis(0, aiming ? p.pitch : -0.3f));
+        setDrawMaterial(M_METAL);
+        drawHeldItem(hand, itemB, p.heldType, p.heldRarity, l, p.swing);
+    }
+    if (glide) { setDrawMaterial(M_FABRIC); drawGlider(p.pos, p.yaw, l); }
+    setDrawMaterial(M_PLAIN);
+    (void)time;
+    return true;
+}
+
 void drawCharacter(const CharPose& p, const Loadout& l, float time) {
     const CosmeticStyle& os = styleOf(l.outfit, CosmeticType::Outfit);
+    if (os.shape == 10 && drawSoldierCharacter(p, l, time)) return;
     Color primary = col(os.primary), secondary = col(os.secondary), accent = col(os.accent), skin = col(os.skin), hair = col(os.hair);
     bool dbno = p.flags & PF_DBNO;
     bool crouch = p.flags & PF_CROUCH;

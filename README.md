@@ -10,7 +10,7 @@ It ships as three programs:
 | `stormisland-server` | Authoritative dedicated game server (UDP) with server-side bot AI |
 | `stormisland-backend` | HTTP backend: accounts, lockers, item shop, stats, friends, matchmaking, game-server orchestration and an **admin panel** |
 
-All art is procedural low-poly geometry, all sounds are synthesized at runtime, and every character, cosmetic and location is an original design. The game is inspired by the genre; it contains no third-party game assets or trademarks.
+Most art is procedural low-poly geometry and every location and most cosmetics are original designs. Vehicles, some props, the "Arena Trooper" outfit, blaster models and many sound effects are **CC0 (public domain) assets by [Kenney](https://kenney.nl)**, listed in `client/assets/CREDITS.md`. Every file-based asset is optional: if `assets/` is missing the game falls back to its procedural models and synthesized sounds. The game is inspired by the genre; it contains no assets or trademarks from other games.
 
 ## Features
 

@@ -9,6 +9,7 @@
 #include "api.h"
 #include "audio.h"
 #include "game_client.h"
+#include "models.h"
 #include "net_client.h"
 #include "render.h"
 
@@ -32,6 +33,7 @@ private:
     NetClient net_;
     Lighting previewLight_;
     RenderTexture2D previewRT_{};
+    ModelLibrary models_;
     std::unique_ptr<GameClient> game_;
     Screen screen_ = Screen::Login;
     LobbyTab tab_ = LobbyTab::Play;

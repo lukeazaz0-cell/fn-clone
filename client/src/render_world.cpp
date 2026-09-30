@@ -3,6 +3,7 @@
 
 #include "raylib.h"
 #include "raymath.h"
+#include "models.h"
 #include "render.h"
 #include "rlgl.h"
 
@@ -575,6 +576,8 @@ void WorldRenderer::buildChunk(Chunk& c, const CollisionWorld& world) {
     for (uint32_t id : c.shapes) {
         const Shape* s = world.shape(id);
         if (!s || !s->alive || s->style == 9) continue; // style 9 = collision only, drawn by its decor
+        // Style 11 = collision for a model-file prop; draw the box only when models are unavailable.
+        if (s->style == 11 && models() && models()->has(PropModel::TruckGreen)) continue;
         Color col = C(s->color);
         col.a = 255;
         if (s->style == 1) col = {(unsigned char)std::min(255, col.r + 30), (unsigned char)std::min(255, col.g + 30), (unsigned char)std::min(255, col.b + 30), 255};
@@ -589,10 +592,17 @@ void WorldRenderer::buildChunk(Chunk& c, const CollisionWorld& world) {
     }
     for (uint32_t di : c.decor) {
         if (decorDead_[di]) continue;
-        const Decor& d = map_->decor[di];
+        Decor d = map_->decor[di];
         if (d.linkedShape != INVALID_ID) {
             const Shape* s = world.shape(d.linkedShape);
             if (!s || !s->alive) { decorDead_[di] = 1; continue; }
+        }
+        if (d.kind == DecorKind::Model) {
+            // Only reached when the model file is missing: bake a procedural stand-in for trees.
+            if (d.model != PropModel::PineModel && d.model != PropModel::TreeCluster) continue;
+            d.kind = DecorKind::PineTree;
+            d.pos.y += 2.0f;
+            d.scale = 1.2f;
         }
         switch (d.kind) {
             case DecorKind::Glass: mb.curMat = M_GLASS; break;
@@ -661,6 +671,7 @@ void WorldRenderer::buildMinimap() {
 void WorldRenderer::build(const GameMap& map, const CollisionWorld& world, Lighting& light) {
     unload();
     map_ = &map;
+    world_ = &world;
     light_ = &light;
     light.setHeightmap(map);
     buildTerrain();
@@ -675,7 +686,8 @@ void WorldRenderer::build(const GameMap& map, const CollisionWorld& world, Light
     for (size_t i = 0; i < map.decor.size(); i++) {
         const Decor& d = map.decor[i];
         int k = d.linkedShape != INVALID_ID ? shapeChunk_[d.linkedShape] : chunkKey(d.pos.x, d.pos.z);
-        chunks_[k].decor.push_back((uint32_t)i);
+        if (d.kind == DecorKind::Model && models() && models()->has(d.model)) chunks_[k].modelDecor.push_back((uint32_t)i);
+        else chunks_[k].decor.push_back((uint32_t)i);
     }
     for (auto& [k, c] : chunks_) {
         int cx = k % 1024 - 64, cz = k / 1024 - 64;
@@ -735,6 +747,25 @@ void WorldRenderer::draw(const Camera3D& cam, float viewDist, float) {
         if (!visible(c.center, 70)) continue;
         for (auto& m : c.models) DrawModel(m, {0, 0, 0}, 1.0f, WHITE);
     }
+    drawModelDecor(cp, viewDist * 0.75f, nullptr);
+}
+
+void WorldRenderer::drawModelDecor(const si::Vec3& center, float radius, Shader* override) {
+    ModelLibrary* lib = models();
+    if (!lib || !world_) return;
+    for (auto& [k, c] : chunks_) {
+        if (c.modelDecor.empty()) continue;
+        if (distXZ(S(c.center), center) > radius + 60) continue;
+        for (uint32_t di : c.modelDecor) {
+            const Decor& d = map_->decor[di];
+            if (d.linkedShape != INVALID_ID) {
+                const Shape* s = world_->shape(d.linkedShape);
+                if (!s || !s->alive) continue;
+            }
+            if (distXZ(d.pos, center) > radius) continue;
+            lib->drawProp(d.model, d.pos, d.yaw, d.scale, override);
+        }
+    }
 }
 
 void WorldRenderer::drawNear(const Vector3& center, float radius, Shader override) {
@@ -753,6 +784,7 @@ void WorldRenderer::drawNear(const Vector3& center, float radius, Shader overrid
     for (auto& [k, c] : chunks_)
         if (near(c.center, 60))
             for (auto& m : c.models) drawWith(m);
+    drawModelDecor(S(center), radius, &override);
 }
 
 void WorldRenderer::drawWater(const Camera3D&, float) {

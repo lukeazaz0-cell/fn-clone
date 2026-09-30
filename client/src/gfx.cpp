@@ -13,6 +13,9 @@ namespace client {
 
 unsigned int gAtlasTex = 0; // used by the immediate-mode primitives
 static int gDrawMat = 0;
+static Shader* gShadowOverride = nullptr;
+void setShadowOverride(Shader* s) { gShadowOverride = s; }
+Shader* shadowOverride() { return gShadowOverride; }
 void setDrawMaterial(int m) { gDrawMat = m; }
 int drawMaterial() { return gDrawMat; }
 
@@ -246,6 +249,25 @@ void main() {
 }
 )";
 
+// Textured models (CC0 Kenney assets): albedo from the model's palette texture.
+const char* kModelFS = R"(
+in vec3 fragPos;
+in vec3 fragNormal;
+in vec4 fragColor;
+in vec2 fragTexCoord;
+in vec2 fragTexCoord2;
+uniform vec4 colDiffuse;
+out vec4 finalColor;
+void main() {
+    vec3 n = normalize(fragNormal);
+    if (!gl_FrontFacing) n = -n;
+    vec4 tex = texture(texture0, fragTexCoord);
+    vec3 albedo = tex.rgb * fragColor.rgb * colDiffuse.rgb;
+    vec3 c = shade(albedo, n, fragPos, 0.08, 20.0, 1.0);
+    finalColor = vec4(finish(c, fragPos), tex.a * colDiffuse.a);
+}
+)";
+
 const char* kSkyVS = R"(#version 330
 in vec3 vertexPosition;
 uniform mat4 mvp;
@@ -359,13 +381,13 @@ float texWood(int x, int y) {
     int plank = y / 64;
     float u = x / (float)TILE;
     float tone = h2(plank, 0, 51) * 0.25f;
-    float grain = 0.5f + 0.5f * std::sin((u * 18 + tfbm(u * 4, y / (float)TILE * 16, 4, 52) * 4 + plank * 3.1f) * 2 * kPi);
+    float grain = 0.5f + 0.5f * std::sin((u * 8 + tfbm(u * 4, y / (float)TILE * 8, 4, 52) * 1.5f + plank * 3.1f) * 2 * kPi);
     float gap = (y % 64 < 3) ? 0.0f : 1.0f;
     float endGap = ((x + plank * 97) % 256 < 3) ? 0.2f : 1.0f;
     float nail = 0;
     int nx = (x + plank * 97) % 128, ny = y % 64;
     if ((nx - 8) * (nx - 8) + (ny - 32) * (ny - 32) < 9) nail = -0.3f;
-    return clampf((0.35f + tone + 0.2f * grain) * gap * endGap + nail, 0, 1);
+    return clampf((0.42f + tone + 0.08f * grain + 0.06f * tnoise(x / 4.0f, y / 32.0f, 64, 53)) * gap * endGap + nail, 0, 1);
 }
 float texBrick(int x, int y) {
     int row = y / 32;
@@ -391,7 +413,7 @@ float texMetal(int x, int y) {
 }
 float texPlaster(int x, int y) {
     float u = x / (float)TILE, v = y / (float)TILE;
-    return clampf(0.45f + 0.18f * tfbm(u * 8, v * 8, 8, 81) + 0.06f * tnoise(u * 128, v * 128, 128, 82), 0, 1);
+    return clampf(0.47f + 0.1f * tfbm(u * 8, v * 8, 8, 81) + 0.05f * tnoise(u * 128, v * 128, 128, 82), 0, 1);
 }
 float texRoof(int x, int y) {
     int row = y / 32;
@@ -500,6 +522,7 @@ void Lighting::load() {
     shader = loadLit(kObjFS);
     terrain = loadLit(kTerrainFS);
     water = loadLit(kWaterFS);
+    model = loadLit(kModelFS);
     sky = LoadShaderFromMemory(kSkyVS, kSkyFS);
     depth = LoadShaderFromMemory(kDepthVS, kDepthFS);
     atlas = buildAtlas();
@@ -523,7 +546,7 @@ void Lighting::load() {
     } else {
         shadows = false;
     }
-    for (Shader* s : {&shader, &terrain, &water}) {
+    for (Shader* s : {&shader, &terrain, &water, &model}) {
         setInt(*s, "shadowMap", SHADOW_SLOT);
         setFloat(*s, "shadowTexel", 1.0f / shadowSize);
         setFloat(*s, "worldSize", WORLD_SIZE);
@@ -531,7 +554,7 @@ void Lighting::load() {
 }
 
 void Lighting::unload() {
-    for (Shader* s : {&shader, &terrain, &water, &sky, &depth})
+    for (Shader* s : {&shader, &terrain, &water, &model, &sky, &depth})
         if (s->id) UnloadShader(*s);
     if (atlas.id) UnloadTexture(atlas);
     if (heightTex.id) UnloadTexture(heightTex);
@@ -564,7 +587,7 @@ void Lighting::begin(const Camera3D& cam, float time) {
     Vector3 groundC = {0.2f, 0.18f, 0.14f};
     Vector3 fogC = colorVec(fogColor);
     Matrix id = MatrixIdentity();
-    for (Shader* s : {&shader, &terrain, &water}) {
+    for (Shader* s : {&shader, &terrain, &water, &model}) {
         setVec3(*s, "viewPos", cam.position);
         setVec3(*s, "sunDir", sunDir);
         setVec3(*s, "sunColor", sunC);
@@ -617,10 +640,12 @@ void Lighting::beginShadowPass(const Vector3& focusIn) {
     BeginMode3D(lc);
     lightVP = MatrixMultiply(rlGetMatrixModelview(), rlGetMatrixProjection());
     rlDisableColorBlend();
+    setShadowOverride(&depth);
 }
 
 void Lighting::endShadowPass() {
     if (!inShadowPass) return;
+    setShadowOverride(nullptr);
     EndMode3D();
     rlEnableColorBlend();
     rlDrawRenderBatchActive();

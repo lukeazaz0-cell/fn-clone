@@ -28,6 +28,10 @@ enum SurfMat : int {
 void setDrawMaterial(int m);
 int drawMaterial();
 
+// While rendering the shadow map, model files are drawn with this shader (null otherwise).
+void setShadowOverride(Shader* s);
+Shader* shadowOverride();
+
 // Renderer state: shaders (objects, terrain, water, sky, shadow depth), the procedural
 // texture atlas, the terrain heightmap texture used by water, and the sun shadow map.
 struct Lighting {
@@ -36,6 +40,7 @@ struct Lighting {
     Shader water{};
     Shader sky{};
     Shader depth{};       // shadow pass
+    Shader model{};       // textured 3D model files
     Texture2D atlas{};
     Texture2D heightTex{};
     unsigned int shadowFbo = 0;
@@ -94,10 +99,12 @@ private:
         std::vector<Model> models;
         std::vector<uint32_t> shapes;  // static shape ids in this chunk
         std::vector<uint32_t> decor;   // decor indices
+        std::vector<uint32_t> modelDecor; // decor drawn from 3D model files
         Vector3 center;
         bool dirty = false;
     };
     const GameMap* map_ = nullptr;
+    const CollisionWorld* world_ = nullptr;
     Lighting* light_ = nullptr;
     std::vector<Model> terrain_;
     std::vector<Vector3> terrainCenters_;
@@ -107,6 +114,7 @@ private:
     Model water_{};
     bool loaded_ = false;
     int chunkKey(float x, float z) const;
+    void drawModelDecor(const si::Vec3& center, float radius, Shader* override);
     void buildTerrain();
     void buildChunk(Chunk& c, const CollisionWorld& world);
     void buildMinimap();

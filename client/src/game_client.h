@@ -42,6 +42,7 @@ struct RemotePlayer {
     float speed = 0;
     si::Vec3 lastPos;
     float swing = 0;
+    float stepTimer = 0;
     std::vector<si::Vec3> trail;
 };
 
@@ -126,6 +127,10 @@ private:
     float damageFlash_ = 0;
     std::vector<Tracer> tracers_;
     std::vector<Flash> flashes_;
+    struct Cloud { si::Vec3 pos, size; float speed; };
+    std::vector<Cloud> clouds_;
+    float stepTimer_ = 0;
+    int lastSlotSound_ = -1;
     float shake_ = 0;
     std::vector<Blast> blasts_;
     std::vector<Particle> particles_;
@@ -144,7 +149,7 @@ private:
     void handleEvent(const std::vector<uint8_t>& ev);
     void pushAction(ActionType t, uint8_t a = 0, uint8_t b = 0);
     void sampleInput(float dt);
-    void stepPrediction(const InputCmd& in);
+    MoveEvents stepPrediction(const InputCmd& in);
     void reconcile(const Snapshot& s);
     void updateInterpolation(float dt);
     void updateEffects(float dt);

@@ -43,7 +43,12 @@ struct Vent {
 };
 
 enum class DecorKind : uint8_t { PineTree = 0, OakTree, PalmTree, JungleTree, Bush, Cactus, Flower, Lamp, Crop, SnowPine, DeadTree, Glass, Trim,
-                                 Bench, Crate, Fence, Barrel, StreetLamp, Mailbox, Hydrant, RoadLine, GrassTuft, Count };
+                                 Bench, Crate, Fence, Barrel, StreetLamp, Mailbox, Hydrant, RoadLine, GrassTuft, Model, Count };
+
+// Prop models drawn by the client from 3D model files (CC0 Kenney assets). Each has a
+// collision box in the map (style 11) and a procedural fallback when the file is missing.
+enum class PropModel : uint8_t { None = 0, TruckGreen, TruckPurple, TruckRed, TruckYellow, Motorcycle, Statue, Column, Banner,
+                                 WeaponRack, Fountain, Flag, PineModel, TreeCluster, Count };
 
 struct Decor {
     DecorKind kind;
@@ -53,6 +58,7 @@ struct Decor {
     Color4 color;
     Vec3 size;                         // half extents for Glass / Trim / RoadLine boxes
     float yaw = 0;                     // orientation for props
+    PropModel model = PropModel::None; // DecorKind::Model only
 };
 
 struct Road { Vec2 a, b; float width; };
@@ -131,6 +137,8 @@ private:
     void crate(float x, float z, float size);
     void propCluster(float cx, float cz, float radius, int count);
     void genStreetProps();
+    void modelProp(PropModel m, float x, float z, float yaw, float scale, Vec3 colHalf, float hp = 0, bool linkCollision = true);
+    void genLandmarkProps();
 
     void buildPoi(POI& p);
 };

@@ -148,6 +148,10 @@ void Backend::seedCatalog() {
                  "price=excluded.price, unlock_level=excluded.unlock_level",
                  {c.id, c.name, std::string(si::COSMETIC_TYPE_NAMES[(int)c.type]), (int64_t)c.rarity, (int64_t)c.price, (int64_t)c.unlockLevel});
     }
+    // Everyone owns the free default cosmetics, including ones added in later versions.
+    for (auto& c : si::cosmeticCatalog())
+        if (c.price == 0 && c.unlockLevel == 0)
+            db_.exec("INSERT OR IGNORE INTO owned_items(account_id, item_id, acquired_at) SELECT id, ?, ? FROM accounts", {c.id, (int64_t)std::time(nullptr)});
 }
 
 std::string Backend::setting(const std::string& key, const std::string& def) {

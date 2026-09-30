@@ -116,6 +116,7 @@ if(STORM_BUILD_CLIENT)
     client/src/api.cpp
     client/src/render_world.cpp
     client/src/gfx.cpp
+    client/src/models.cpp
     client/src/render_chars.cpp
     client/src/hud.cpp
     client/src/menus.cpp
@@ -124,6 +125,9 @@ if(STORM_BUILD_CLIENT)
     client/src/game_client.cpp
   )
   target_link_libraries(stormisland PRIVATE storm_server_core raylib)
+  # CC0 models/sounds (client/assets/CREDITS.md) next to the executable
+  add_custom_command(TARGET stormisland POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/client/assets $<TARGET_FILE_DIR:stormisland>/assets)
   if(APPLE)
     target_link_libraries(stormisland PRIVATE "-framework IOKit" "-framework Cocoa" "-framework OpenGL")
   endif()
