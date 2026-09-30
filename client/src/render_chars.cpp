@@ -296,9 +296,16 @@ static bool drawSoldierCharacter(const CharPose& p, const Loadout& l, float time
     else if (p.speed > 7.0f) anim = SoldierAnim::Sprint;
     else if (p.speed > 0.6f) anim = SoldierAnim::Walk;
     else if (aiming) anim = (p.flags & PF_FIRING) ? SoldierAnim::HoldShoot : SoldierAnim::Hold;
+    if (p.seatPose == SEAT_SIT) anim = aiming && (p.flags & PF_FIRING) ? SoldierAnim::HoldShoot : SoldierAnim::Crouch;
+    else if (p.seatPose == SEAT_STAND) anim = aiming ? ((p.flags & PF_FIRING) ? SoldierAnim::HoldShoot : SoldierAnim::Hold) : SoldierAnim::Idle;
     float scale = 2.9f;
     si::Vec3 feet = p.pos;
     if (sky) feet = feet + si::Vec3{0, 0.4f, 0};
+    if (p.seatPose == SEAT_SIT) {
+        // The chunky model sits lower and a bit smaller so it fits the seats
+        scale = 2.25f;
+        feet = feet + si::Vec3{0, 0.12f, 0} - yawBasis(p.yaw).f * 0.12f;
+    }
     lib->drawSoldier(feet, p.yaw, anim, p.animTime, scale, shadowOverride());
     // Held item: only in the holding poses, where the right hand is extended in front.
     bool holding = anim == SoldierAnim::Hold || anim == SoldierAnim::HoldShoot || (p.flags & PF_HARVESTING);
@@ -378,6 +385,23 @@ void drawCharacter(const CharPose& p, const Loadout& l, float time) {
     if (sky) { armSwingL = 2.4f; armSwingR = 2.4f; elbowL = elbowR = 0.6f; legSwingL = 0.3f; legSwingR = -0.3f; kneeL = kneeR = -0.4f; }
     if (glide) { armSwingL = armSwingR = 3.0f; elbowL = elbowR = 0.1f; legSwingL = legSwingR = 0.1f; kneeL = kneeR = -0.3f; }
     if (dbno) { armSwingL = 2.2f + cycle * 0.5f; armSwingR = 2.2f - cycle * 0.5f; kneeL = kneeR = -0.5f; }
+    if (p.seatPose == SEAT_SIT) {
+        // Thighs forward along the seat, shins hanging down
+        hipH = 0.55f;
+        legSwingL = legSwingR = 1.5f;
+        kneeL = kneeR = -1.45f;
+        bob = 0;
+        if (!aiming && !p.emote) { armSwingL = armSwingR = 0.25f; elbowL = elbowR = 0.35f; }
+    } else if (p.seatPose == SEAT_STAND) {
+        // Surfer stance on a board
+        hipH = 0.82f;
+        legSwingL = 0.35f; legSwingR = -0.3f;
+        kneeL = kneeR = -0.35f;
+        bob = 0;
+        torsoTwist += 0.35f;
+        if (!aiming) { armSwingL = 0.6f; armSwingR = -0.4f; elbowL = elbowR = 0.4f; }
+    }
+    if (p.steering && !aiming && !p.emote) { armSwingL = armSwingR = 1.05f; elbowL = elbowR = 0.75f; }
 
     setDrawMaterial(M_FABRIC);
     Basis torsoB = compose(body, yawBasis(torsoTwist));

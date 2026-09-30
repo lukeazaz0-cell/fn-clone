@@ -281,18 +281,51 @@ void NetServer::sendSnapshots() {
         sp.team = p.team;
         sp.emote = p.emote;
         sp.buildPiece = p.buildMode ? (uint8_t)p.buildPiece : 0xFF;
+        sp.vehicle = p.vehicle;
+        sp.seat = p.seat;
         base.players.push_back(sp);
     }
     for (auto& pr : game_.projectiles) base.projectiles.push_back({pr.id, (uint8_t)pr.type, pr.pos});
     for (auto& d : game_.supplyDrops)
         if (!d.opened) base.drops.push_back({d.id, d.pos});
     for (auto& e : game_.effects) base.effects.push_back({(uint8_t)e.type, e.player, e.a, e.b, e.extra});
+    std::vector<SnapVehicle> allVehicles;
+    for (auto& v : game_.vehicles) {
+        if (!v.alive) continue;
+        SnapVehicle sv;
+        sv.id = v.id;
+        sv.type = (uint8_t)v.type;
+        sv.pos = v.st.pos;
+        sv.yaw = v.st.yaw;
+        sv.pitch = v.st.pitch;
+        sv.roll = v.st.roll;
+        sv.hp = (uint8_t)clampf(v.hp / std::max(1.0f, v.maxHp) * 255.0f, 1, 255);
+        sv.flags = (v.st.boosting ? VF_BOOST : 0) | (v.st.onGround ? VF_GROUND : 0) | (v.hasDriver() ? VF_DRIVER : 0) | (v.st.inWater ? VF_WATER : 0);
+        allVehicles.push_back(sv);
+    }
     game_.effects.clear();
 
     ByteWriter w;
     for (auto& [addr, c] : clients_) {
         Snapshot s = base; // copy (players list shared per tick is small)
         auto pit = game_.players.find(c.playerId);
+        // Vehicles near the viewer (or the player they spectate)
+        {
+            Vec3 view{WORLD_SIZE / 2, 0, WORLD_SIZE / 2};
+            bool whole = true;
+            if (pit != game_.players.end()) {
+                const Player& vp = pit->second;
+                auto sit = vp.eliminated ? game_.players.find(vp.spectating) : pit;
+                const Player& focus = sit != game_.players.end() ? sit->second : vp;
+                if (focus.move.mode != MoveMode::OnBus && focus.move.mode != MoveMode::Skydive) { view = focus.move.pos; whole = false; }
+                else if (focus.move.mode == MoveMode::Skydive) { view = focus.move.pos; whole = false; }
+            }
+            for (auto& sv : allVehicles) {
+                bool mine = pit != game_.players.end() && pit->second.vehicle == sv.id;
+                if (whole || mine || distXZ(sv.pos, view) < 420.0f) s.vehicles.push_back(sv);
+            }
+            if (whole && s.vehicles.size() > 160) s.vehicles.resize(160);
+        }
         if (pit != game_.players.end()) {
             const Player& p = pit->second;
             s.hasSelf = true;
@@ -335,6 +368,15 @@ void NetServer::sendSnapshots() {
             m.placement = (uint8_t)std::min(255, p.placement);
             m.bloom = p.bloom;
             m.team = p.team;
+            m.vehicle = p.vehicle;
+            m.seat = p.seat;
+            if (const Vehicle* v = game_.findVehicle(p.vehicle)) {
+                m.vehicleType = (uint8_t)v->type;
+                m.veh = v->st;
+            } else {
+                m.vehicle = 0xFFFF;
+                m.seat = NO_SEAT;
+            }
         }
         size_t budget = 0;
         for (auto& e : c.pending) {

@@ -17,6 +17,25 @@ namespace {
 Color darker4(Color c) { return {(unsigned char)(c.r * 0.6f), (unsigned char)(c.g * 0.6f), (unsigned char)(c.b * 0.6f), c.a}; }
 bool newer16(uint16_t a, uint16_t b) { return (int16_t)(a - b) > 0; }
 float angleLerp(float a, float b, float t) { return a + wrapAngle(b - a) * t; }
+si::Vec3 rotateAround(const si::Vec3& v, const si::Vec3& axis, float ang) {
+    float c = std::cos(ang), sn = std::sin(ang);
+    return v * c + axis.cross(v) * sn + axis * (axis.dot(v) * (1 - c));
+}
+void rollBasis(Basis& b, const si::Vec3& delta, float radius) {
+    si::Vec3 flat{delta.x, 0, delta.z};
+    float d = flat.len();
+    if (d < 1e-4f) return;
+    si::Vec3 axis = si::Vec3{0, 1, 0}.cross(flat / d).norm();
+    float ang = d / radius;
+    b.r = rotateAround(b.r, axis, ang);
+    b.u = rotateAround(b.u, axis, ang);
+    b.f = rotateAround(b.f, axis, ang);
+    // Gram-Schmidt, keeping the basis handedness
+    b.f = b.f.norm();
+    b.u = (b.u - b.f * b.u.dot(b.f)).norm();
+    si::Vec3 rc = b.u.cross(b.f);
+    b.r = rc * (b.r.dot(rc) < 0 ? -1.0f : 1.0f);
+}
 }
 
 GameClient::GameClient(NetClient& net, Settings& settings, AudioSystem& audio) : net_(net), settings_(settings), audio_(audio) {
@@ -119,6 +138,19 @@ void GameClient::applySnapshot(const Snapshot& s) {
         rp.buf.push_back({s.time, sp});
         while (rp.buf.size() > 40) rp.buf.pop_front();
     }
+    for (auto& [id, v] : vehicles_) v.present = false;
+    for (auto& sv : s.vehicles) {
+        ClientVehicle& cv = vehicles_[sv.id];
+        cv.id = sv.id;
+        cv.present = true;
+        if (!cv.buf.empty() && s.time <= cv.buf.back().t) continue;
+        cv.buf.push_back({s.time, sv});
+        while (cv.buf.size() > 40) cv.buf.pop_front();
+    }
+    for (auto it = vehicles_.begin(); it != vehicles_.end();) {
+        if (!it->second.present) it = vehicles_.erase(it);
+        else ++it;
+    }
     projectiles_ = s.projectiles;
     for (auto& d : s.drops) {
         auto it = drops_.find(d.id);
@@ -178,6 +210,21 @@ void GameClient::applySnapshot(const Snapshot& s) {
                 break;
             }
             case FX_BUILD: audio_.play(Sfx::Build, vol * 0.7f); break;
+            case FX_HONK: {
+                float hv = clampf(1.0f - dist / 120.0f, 0.0f, 1.0f);
+                audio_.play(Sfx::Horn, hv * 0.8f, e.extra == (uint8_t)VehicleType::CrashQuad ? 0.8f : e.extra == (uint8_t)VehicleType::Trolley ? 1.4f : 1.0f);
+                break;
+            }
+            case FX_BOOST: audio_.play(Sfx::Boost, vol * 0.8f, e.extra == (uint8_t)VehicleType::CrashQuad ? 0.85f : 1.1f); break;
+            case FX_CRASH: {
+                audio_.play(Sfx::Crash, vol * clampf(e.extra / 120.0f, 0.3f, 1.0f));
+                shake_ = std::max(shake_, clampf(1.0f - dist / 25.0f, 0.0f, 1.0f) * 0.45f);
+                for (int i = 0; i < 10; i++) {
+                    si::Vec3 v{GetRandomValue(-100, 100) / 25.0f, GetRandomValue(20, 120) / 25.0f, GetRandomValue(-100, 100) / 25.0f};
+                    particles_.push_back({e.a, v, 0, 0.7f, Color{120, 110, 100, 255}, 0.15f});
+                }
+                break;
+            }
             default: break;
         }
     }
@@ -196,6 +243,39 @@ void GameClient::reconcile(const Snapshot& s) {
     pred_.crouched = self_.mflags & 4;
     pred_.prevButtons = self_.prevButtons;
     pred_.fallStartY = self_.fallStartY;
+    if (self_.vehicle != 0xFFFF && self_.seat == 0 && (self_.flags & PF_ALIVE)) {
+        // Driving: predict the vehicle itself and replay unacknowledged inputs through it.
+        bool continuing = driving_ && drivingId_ == self_.vehicle;
+        si::Vec3 beforeVeh = predVeh_.pos;
+        float beforeYaw = predVeh_.yaw;
+        predVeh_ = self_.veh;
+        drivingType_ = (VehicleType)self_.vehicleType;
+        drivingId_ = self_.vehicle;
+        driving_ = true;
+        for (auto& in : pendingInputs_) stepPrediction(in);
+        if (continuing) {
+            vehSmooth_ += beforeVeh - predVeh_.pos;
+            vehYawSmooth_ = wrapAngle(vehYawSmooth_ + wrapAngle(beforeYaw - predVeh_.yaw));
+            if (vehSmooth_.len() > 4.0f) vehSmooth_ = {};
+            if (std::fabs(vehYawSmooth_) > 0.8f) vehYawSmooth_ = 0;
+        } else {
+            vehSmooth_ = {};
+            vehYawSmooth_ = 0;
+            smoothOffset_ = {};
+        }
+        pred_.pos = vehicleSeatPos(predVeh_, drivingType_, 0);
+        pred_.mode = MoveMode::Vehicle;
+        predInit_ = true;
+        return;
+    }
+    driving_ = false;
+    if (self_.mode == MoveMode::Vehicle) {
+        // Passenger: the view follows the interpolated vehicle
+        pendingInputs_.clear();
+        smoothOffset_ = {};
+        predInit_ = false;
+        return;
+    }
     if (!predictable || !(self_.flags & PF_ALIVE)) {
         pendingInputs_.clear();
         smoothOffset_ = {};
@@ -217,6 +297,16 @@ MoveEvents GameClient::stepPrediction(const InputCmd& in) {
     mi.fwd = in.fwd;
     mi.right = in.right;
     mi.buttons = in.buttons;
+    if (driving_) {
+        VehicleEvents ve = stepVehicle(predVeh_, drivingType_, mi, true, world_, SIM_DT);
+        pred_.pos = vehicleSeatPos(predVeh_, drivingType_, 0);
+        pred_.vel = predVeh_.vel;
+        MoveEvents me;
+        me.jumped = ve.jumped;
+        me.landed = ve.landed;
+        return me;
+    }
+    if (self_.mode == MoveMode::Vehicle) return MoveEvents();
     MoveParams mp;
     mp.launchPads = &launchPads_;
     mp.dbno = self_.flags & PF_DBNO;
@@ -434,7 +524,7 @@ void GameClient::sampleInput(float) {
     bool overlay = mapOpen_ || inventoryOpen_ || paused_;
     if (!overlay) {
         if (IsKeyDown(KEY_W)) in.fwd += 1;
-        if (settings_.autotest && (pred_.mode == MoveMode::Glide || (pred_.mode == MoveMode::Ground && std::fmod(time_, 6.0f) < 2.0f))) in.fwd = 1;
+        if (settings_.autotest && !settings_.autotestVehicles && (pred_.mode == MoveMode::Glide || (pred_.mode == MoveMode::Ground && std::fmod(time_, 6.0f) < 2.0f))) in.fwd = 1;
         if (IsKeyDown(KEY_S)) in.fwd -= 1;
         if (IsKeyDown(KEY_D)) in.right += 1;
         if (IsKeyDown(KEY_A)) in.right -= 1;
@@ -447,6 +537,11 @@ void GameClient::sampleInput(float) {
             if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) in.buttons |= IN_ADS;
             if (IsKeyDown(KEY_R)) in.buttons |= IN_RELOAD;
         }
+    }
+    if (settings_.autotestVehicles) {
+        autopilotVehicles(in);
+        in.yaw = camYaw_;
+        in.pitch = camPitch_;
     }
     if (localControllable()) {
         MoveEvents ev = stepPrediction(in);
@@ -469,7 +564,84 @@ void GameClient::sampleInput(float) {
     net_.sendInput(eventAck_, recentInputs_, pendingActions_);
 }
 
+// Scripted driver for STORM_AUTOTEST=vehicles: walk to the nearest vehicle of a type not yet
+// tried, get in, drive (with some steering and boost), get out, repeat.
+void GameClient::autopilotVehicles(InputCmd& in) {
+    if (!localControllable()) return;
+    if (inVehicle()) {
+        apDrive_ += SIM_DT;
+        VehicleVisual vv;
+        bool have = vehicleVisual(self_.vehicle, vv);
+        in.fwd = 1;
+        float ph = std::fmod(apDrive_, 5.0f);
+        in.right = (ph > 3.0f && ph < 3.8f) ? 1 : 0;
+        if (apDrive_ > 1.5f && apDrive_ < 4.0f) in.buttons |= IN_SPRINT;
+        if (have) {
+            float trail = vv.type == VehicleType::Hoverboard || vv.type == VehicleType::RollerBall ? 0.35f : 0.9f;
+            camYaw_ = angleLerp(camYaw_, vv.yaw + trail, 0.04f);
+            camPitch_ = lerpf(camPitch_, -0.2f, 0.05f);
+            if (vv.type == VehicleType::RollerBall && std::fmod(apDrive_, 3.0f) < 0.05f) in.buttons |= IN_JUMP;
+        }
+        if (apDrive_ > 10.0f) {
+            apDoneTypes_ |= 1u << self_.vehicleType;
+            in.buttons |= IN_INTERACT;
+            apDrive_ = 0;
+            apTarget_ = 0xFFFF;
+        }
+        return;
+    }
+    apDrive_ = 0;
+    si::Vec3 me = pred_.pos;
+    auto it = vehicles_.find(apTarget_);
+    apTargetTime_ += SIM_DT;
+    bool giveUp = apTargetTime_ > 20.0f || apStuck_ > 2.5f;
+    if (giveUp && apTarget_ != 0xFFFF) { apSkip_.push_back(apTarget_); apTarget_ = 0xFFFF; apStuck_ = 0; }
+    if (it == vehicles_.end() || apTarget_ == 0xFFFF || (it->second.cur.flags & VF_DRIVER)) {
+        apTarget_ = 0xFFFF;
+        apTargetTime_ = 0;
+        float best = 1e9f;
+        si::Vec3 eye = me + si::Vec3{0, 1.6f, 0};
+        // Prefer untried types in plain sight, then anything in sight, then anything
+        for (int pass = 0; pass < 3 && apTarget_ == 0xFFFF; pass++)
+            for (auto& [id, v] : vehicles_) {
+                if (!v.present || (v.cur.flags & VF_DRIVER)) continue;
+                if (std::find(apSkip_.begin(), apSkip_.end(), id) != apSkip_.end()) continue;
+                if (pass == 0 && (apDoneTypes_ & (1u << v.cur.type))) continue;
+                if (pass < 2 && !world_.lineOfSight(eye, v.cur.pos + si::Vec3{0, 1.0f, 0})) continue;
+                if (v.cur.pos.y < WATER_LEVEL + 0.3f) continue;
+                float d = distXZ(v.cur.pos, me);
+                if (d < best) { best = d; apTarget_ = id; }
+            }
+        it = vehicles_.find(apTarget_);
+        if (it == vehicles_.end()) return;
+    }
+    const ClientVehicle& v = it->second;
+    float d = distXZ(v.cur.pos, me);
+    camYaw_ = angleLerp(camYaw_, yawFromDir(v.cur.pos - me), 0.2f);
+    camPitch_ = lerpf(camPitch_, -0.15f, 0.1f);
+    float reach = vehicleDef((VehicleType)v.cur.type).radius + 1.4f;
+    if (d > reach) {
+        in.fwd = 1;
+        in.buttons |= IN_SPRINT;
+        apStuck_ = distXZ(me, apLastPos_) < 0.02f ? apStuck_ + SIM_DT : 0;
+        if (apStuck_ > 0.4f) { in.buttons |= IN_JUMP; in.right = 1; }
+    } else if (std::fmod(time_, 0.4f) < 0.2f) {
+        in.buttons |= IN_INTERACT;
+    }
+    apLastPos_ = me;
+}
+
 si::Vec3 GameClient::viewPos() const {
+    if (localControllable() && inVehicle()) {
+        VehicleVisual vv;
+        if (vehicleVisual(self_.vehicle, vv)) {
+            VehicleState st;
+            st.pos = vv.pos;
+            st.yaw = vv.yaw;
+            return vehicleSeatPos(st, vv.type, self_.seat);
+        }
+        return self_.pos;
+    }
     if (localControllable()) return pred_.pos + smoothOffset_;
     if (const RemotePlayer* t = spectateTarget()) return t->cur.pos;
     return haveSelf_ ? self_.pos : si::Vec3{WORLD_SIZE / 2, 50, WORLD_SIZE / 2};
@@ -518,8 +690,50 @@ void GameClient::updateInterpolation(float dt) {
             p.trail.erase(p.trail.begin());
         }
     }
+    for (auto& [id, v] : vehicles_) {
+        if (v.buf.empty()) continue;
+        while (v.buf.size() > 2 && v.buf[1].t <= renderTime_) v.buf.pop_front();
+        const auto& a = v.buf.front();
+        if (v.buf.size() >= 2 && renderTime_ >= a.t) {
+            const auto& b = v.buf[1];
+            float t = clampf((renderTime_ - a.t) / std::max(0.001f, b.t - a.t), 0, 1);
+            v.cur = b.s;
+            v.cur.pos = lerp3(a.s.pos, b.s.pos, t);
+            if ((b.s.pos - a.s.pos).len() > 25) v.cur.pos = b.s.pos;
+            v.cur.yaw = angleLerp(a.s.yaw, b.s.yaw, t);
+            v.cur.pitch = angleLerp(a.s.pitch, b.s.pitch, t);
+            v.cur.roll = angleLerp(a.s.roll, b.s.roll, t);
+            float dyaw = wrapAngle(b.s.yaw - a.s.yaw) / std::max(0.001f, b.t - a.t);
+            v.steer = lerpf(v.steer, clampf(-dyaw * 0.6f, -1, 1), clampf(dt * 8, 0, 1));
+        } else {
+            v.cur = a.s;
+        }
+        si::Vec3 delta = v.cur.pos - v.lastPos;
+        if (!v.init || delta.len() > 25) { delta = {}; v.init = true; v.ballSpin = Basis(); }
+        float moved = delta.lenXZ();
+        float fwdSign = (delta.x * std::sin(v.cur.yaw) + delta.z * std::cos(v.cur.yaw)) >= 0 ? 1.0f : -1.0f;
+        v.speed = lerpf(v.speed, dt > 0 ? moved / dt : 0, 0.3f);
+        v.wheelSpin += fwdSign * moved / 0.35f;
+        if ((VehicleType)v.cur.type == VehicleType::RollerBall) rollBasis(v.ballSpin, delta, 1.2f);
+        v.lastPos = v.cur.pos;
+    }
+    if (driving_) {
+        static si::Vec3 lastDrivePos;
+        si::Vec3 p = predVeh_.pos + vehSmooth_;
+        si::Vec3 delta = p - lastDrivePos;
+        if (delta.len() > 25) delta = {};
+        float fwdSign = (delta.x * std::sin(predVeh_.yaw) + delta.z * std::cos(predVeh_.yaw)) >= 0 ? 1.0f : -1.0f;
+        vehWheelSpin_ += fwdSign * delta.lenXZ() / 0.35f;
+        if (drivingType_ == VehicleType::RollerBall) rollBasis(vehBallSpin_, delta, 1.2f);
+        float steerIn = 0;
+        if (!(mapOpen_ || inventoryOpen_ || paused_)) steerIn = (IsKeyDown(KEY_D) ? 1.0f : 0.0f) - (IsKeyDown(KEY_A) ? 1.0f : 0.0f);
+        vehSteerVis_ = lerpf(vehSteerVis_, steerIn, clampf(dt * 10, 0, 1));
+        lastDrivePos = p;
+    }
     float decay = std::exp(-dt * 12.0f);
     smoothOffset_ = smoothOffset_ * decay;
+    vehSmooth_ = vehSmooth_ * std::exp(-dt * 8.0f);
+    vehYawSmooth_ *= std::exp(-dt * 10.0f);
 }
 
 void GameClient::updateEffects(float dt) {
@@ -552,6 +766,10 @@ void GameClient::updateEffects(float dt) {
 void GameClient::computeInteractPrompt() {
     interactPrompt_.clear();
     if (!localControllable()) return;
+    if (inVehicle()) {
+        interactPrompt_ = "E to get out";
+        return;
+    }
     si::Vec3 origin = pred_.pos + si::Vec3{0, 1.0f, 0};
     si::Vec3 look = dirFromAngles(camYaw_, camPitch_);
     float best = 1e9f;
@@ -574,6 +792,16 @@ void GameClient::computeInteractPrompt() {
             consider(map_.ammoBoxes[i] + si::Vec3{0, 0.4f, 0}, INTERACT_RANGE, "Hold E to open ammo box");
     for (auto& [id, d] : drops_)
         if (!d.opened && d.pos.y <= d.groundY + 0.1f) consider(d.pos + si::Vec3{0, 0.6f, 0}, INTERACT_RANGE + 0.5f, "Hold E to open supply drop");
+    for (auto& [id, v] : vehicles_) {
+        if (!v.present || std::fabs(v.cur.pos.x - origin.x) > 6 || std::fabs(v.cur.pos.z - origin.z) > 6) continue;
+        const VehicleDef& d = vehicleDef((VehicleType)v.cur.type);
+        int taken = 0;
+        bool driverTaken = v.cur.flags & VF_DRIVER;
+        for (auto& [pid, p] : players_) if (p.present && p.cur.vehicle == id) taken++;
+        if (taken >= d.seats) continue;
+        std::string verb = driverTaken ? "ride in " : (d.seats > 1 ? "drive " : "ride ");
+        consider(v.cur.pos + si::Vec3{0, 0.8f, 0}, d.radius + 1.8f, std::string("E to ") + verb + d.name);
+    }
     for (auto& [id, it] : items_)
         if (std::fabs(it.pos.x - origin.x) < 4 && std::fabs(it.pos.z - origin.z) < 4) {
             std::string name = itemDisplayName(it.stack);
@@ -644,11 +872,15 @@ bool GameClient::frame(float dt) {
                 if (s > 5) s = 0;
                 pushAction(ActionType::SelectSlot, (uint8_t)s);
             }
-            if (IsKeyPressed(KEY_Q)) pushAction(ActionType::SetBuildMode, self_.buildMode ? 0 : 1, self_.buildPiece);
-            if (IsKeyPressed(KEY_Z)) pushAction(ActionType::SetBuildMode, 1, (uint8_t)PieceType::Wall);
-            if (IsKeyPressed(KEY_X)) pushAction(ActionType::SetBuildMode, 1, (uint8_t)PieceType::Floor);
-            if (IsKeyPressed(KEY_C)) pushAction(ActionType::SetBuildMode, 1, (uint8_t)PieceType::Ramp);
-            if (IsKeyPressed(KEY_V)) pushAction(ActionType::SetBuildMode, 1, (uint8_t)PieceType::Cone);
+            if (inVehicle()) {
+                if (IsKeyPressed(KEY_C)) pushAction(ActionType::ChangeSeat);
+            } else {
+                if (IsKeyPressed(KEY_Q)) pushAction(ActionType::SetBuildMode, self_.buildMode ? 0 : 1, self_.buildPiece);
+                if (IsKeyPressed(KEY_Z)) pushAction(ActionType::SetBuildMode, 1, (uint8_t)PieceType::Wall);
+                if (IsKeyPressed(KEY_X)) pushAction(ActionType::SetBuildMode, 1, (uint8_t)PieceType::Floor);
+                if (IsKeyPressed(KEY_C)) pushAction(ActionType::SetBuildMode, 1, (uint8_t)PieceType::Ramp);
+                if (IsKeyPressed(KEY_V)) pushAction(ActionType::SetBuildMode, 1, (uint8_t)PieceType::Cone);
+            }
             if (self_.buildMode) {
                 if (IsKeyPressed(KEY_R)) pushAction(ActionType::RotatePiece);
                 if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) pushAction(ActionType::SetBuildMat, (uint8_t)((self_.buildMat + 1) % 3));
@@ -702,6 +934,7 @@ bool GameClient::frame(float dt) {
         audio_.loop(Loop::Engine, 0);
     }
     audio_.loop(Loop::Ambience, 0.22f);
+    updateVehicleAudio(dt);
     // Weapon switch click
     if (haveSelf_ && (int)self_.selected != lastSlotSound_) {
         if (lastSlotSound_ >= 0) audio_.play(Sfx::WeaponSwitch, 0.5f);
@@ -711,6 +944,103 @@ bool GameClient::frame(float dt) {
     render3D();
     renderHud();
     return !leave_;
+}
+
+// ======================================================================= vehicles
+
+bool GameClient::vehicleVisual(uint16_t id, VehicleVisual& out) const {
+    if (driving_ && id == drivingId_) {
+        out.type = drivingType_;
+        out.id = id;
+        out.pos = predVeh_.pos + vehSmooth_;
+        out.yaw = predVeh_.yaw + vehYawSmooth_;
+        out.pitch = predVeh_.pitch;
+        out.roll = predVeh_.roll;
+        out.speed = predVeh_.vel.len();
+        out.boosting = predVeh_.boosting;
+        out.wheelSpin = vehWheelSpin_;
+        out.steer = vehSteerVis_;
+        out.ballSpin = vehBallSpin_;
+        out.occupied = true;
+        auto it = vehicles_.find(id);
+        out.hp = it != vehicles_.end() ? it->second.cur.hp / 255.0f : 1.0f;
+        return true;
+    }
+    auto it = vehicles_.find(id);
+    if (it == vehicles_.end() || !it->second.present || it->second.buf.empty()) return false;
+    const ClientVehicle& v = it->second;
+    out.type = (VehicleType)v.cur.type;
+    out.id = id;
+    out.pos = v.cur.pos;
+    out.yaw = v.cur.yaw;
+    out.pitch = v.cur.pitch;
+    out.roll = v.cur.roll;
+    out.speed = v.speed;
+    out.boosting = v.cur.flags & VF_BOOST;
+    out.wheelSpin = v.wheelSpin;
+    out.steer = v.steer;
+    out.ballSpin = v.ballSpin;
+    out.occupied = v.cur.flags & VF_DRIVER;
+    out.hp = v.cur.hp / 255.0f;
+    return true;
+}
+
+void GameClient::renderVehicles(bool shellPass) {
+    si::Vec3 cp = S(cam_.position);
+    std::vector<uint16_t> ids;
+    for (auto& [id, v] : vehicles_) ids.push_back(id);
+    if (driving_ && !vehicles_.count(drivingId_)) ids.push_back(drivingId_);
+    for (uint16_t id : ids) {
+        VehicleVisual vv;
+        if (!vehicleVisual(id, vv)) continue;
+        if ((vv.pos - cp).len() > settings_.viewDistance * 0.9f) continue;
+        if (shellPass) drawVehicleShell(vv, time_);
+        else drawVehicle(vv, time_);
+    }
+}
+
+void GameClient::updateVehicleAudio(float dt) {
+    (void)dt;
+    // Loudest nearby running vehicle drives the engine / hover / rolling loops.
+    si::Vec3 me = viewPos();
+    float bestEngine = 0, bestHover = 0, bestRoll = 0;
+    float pEngine = 1, pHover = 1, pRoll = 1;
+    auto consider = [&](const VehicleVisual& vv, bool mine) {
+        float d = (vv.pos - me).len();
+        float near = mine ? 1.0f : clampf(1.0f - d / 70.0f, 0.0f, 1.0f);
+        if (near <= 0) return;
+        float sp = vv.speed;
+        switch (vv.type) {
+            case VehicleType::GolfCart:
+            case VehicleType::CrashQuad: {
+                if (!vv.occupied) return;
+                float vol = near * (0.25f + clampf(sp / 25.0f, 0, 1) * 0.35f) * (mine ? 1.0f : 0.8f);
+                if (vol > bestEngine) {
+                    bestEngine = vol;
+                    pEngine = (vv.type == VehicleType::GolfCart ? 1.35f : 0.8f) + sp / 30.0f + (vv.boosting ? 0.25f : 0.0f);
+                }
+                break;
+            }
+            case VehicleType::Hoverboard: {
+                float vol = near * (0.15f + clampf(sp / 25.0f, 0, 1) * 0.3f);
+                if (vol > bestHover) { bestHover = vol; pHover = 0.9f + sp / 30.0f + (vv.boosting ? 0.3f : 0.0f); }
+                break;
+            }
+            default: {
+                if (sp < 1.0f) return;
+                float vol = near * clampf(sp / 20.0f, 0, 1) * 0.5f;
+                if (vol > bestRoll) { bestRoll = vol; pRoll = 0.7f + sp / 35.0f; }
+                break;
+            }
+        }
+    };
+    for (auto& [id, v] : vehicles_) {
+        VehicleVisual vv;
+        if (vehicleVisual(id, vv)) consider(vv, inVehicle() && id == self_.vehicle);
+    }
+    audio_.loop(Loop::Vehicle, bestEngine, pEngine);
+    audio_.loop(Loop::Hover, bestHover, pHover);
+    audio_.loop(Loop::Roll, bestRoll, pRoll);
 }
 
 // ======================================================================= rendering
@@ -746,6 +1076,14 @@ void GameClient::render3D() {
         CameraRig rig = thirdPersonCamera(focus, yaw, pitch, ads, crouch);
         bool sky = haveSelf_ && (self_.mode == MoveMode::Skydive || self_.mode == MoveMode::Glide) && !spec;
         if (sky) rig.pos = focus + si::Vec3{0, 2.2f, 0} - rig.dir * 7.0f;
+        // Vehicles: pull the camera back so the whole vehicle is in view
+        VehicleVisual camVeh;
+        if (!spec && inVehicle() && vehicleVisual(self_.vehicle, camVeh) && !ads) {
+            float back = camVeh.type == VehicleType::Hoverboard ? 4.8f : camVeh.type == VehicleType::Trolley ? 5.0f : 7.0f;
+            si::Vec3 pivot = camVeh.pos + si::Vec3{0, camVeh.type == VehicleType::RollerBall ? 1.4f : 1.6f, 0};
+            rig.pos = pivot - rig.dir * back + si::Vec3{0, 1.1f, 0};
+            focus = camVeh.pos;
+        }
         // Pull the camera in front of walls
         si::Vec3 head = focus + si::Vec3{0, crouch ? 1.3f : 1.8f, 0};
         si::Vec3 toCam = rig.pos - head;
@@ -775,6 +1113,7 @@ void GameClient::render3D() {
         BeginShaderMode(light_.depth);
         renderStructures();
         renderPlayers();
+        renderVehicles(false);
         renderBus();
         EndShaderMode();
         light_.endObjects();
@@ -808,8 +1147,10 @@ void GameClient::render3D() {
     BeginShaderMode(light_.shader);
     renderStructures();
     renderItems();
+    renderVehicles(false);
     renderPlayers();
     renderBus();
+    renderVehicles(true);
     EndShaderMode();
     light_.endObjects();
     worldR_.drawWater(cam_, time_);
@@ -955,11 +1296,38 @@ void GameClient::renderPlayers() {
             pose.flags = p.cur.flags;
             pose.speed = p.speed;
         }
+        uint16_t vehId = local ? self_.vehicle : p.cur.vehicle;
+        uint8_t seat = local ? self_.seat : p.cur.seat;
+        if (vehId != 0xFFFF) {
+            VehicleVisual vv;
+            if (vehicleVisual(vehId, vv)) {
+                const VehicleDef& d = vehicleDef(vv.type);
+                if (seat >= d.seats) seat = 0;
+                VehicleState st;
+                st.pos = vv.pos;
+                st.yaw = vv.yaw;
+                pose.pos = vehicleSeatPos(st, vv.type, seat);
+                if (vv.type == VehicleType::Hoverboard) pose.pos.y += 0.06f * std::sin(time_ * 3.0f + vv.id);
+                pose.seatPose = d.seatPose[seat];
+                pose.steering = seat == 0;
+                pose.mode = MoveMode::Ground;
+                pose.speed = 0;
+                bool aimingSeat = d.seatShoot[seat] && pose.flags & (PF_FIRING | PF_ADS);
+                if (!aimingSeat) pose.yaw = vv.yaw;
+                if (aimingSeat) pose.steering = false;
+                if (!d.seatShoot[seat]) pose.steering = seat == 0;
+            }
+        }
         if ((S(cam_.position) - pose.pos).len() > settings_.viewDistance * 0.8f) continue;
         pose.animTime = p.animTime;
         pose.heldType = local ? (self_.selected >= 1 && self_.selected <= 5 ? (uint8_t)self_.inv[self_.selected - 1].type : 0) : p.cur.heldType;
         pose.heldRarity = local ? (self_.selected >= 1 && self_.selected <= 5 ? (uint8_t)self_.inv[self_.selected - 1].rarity : 0) : p.cur.heldRarity;
         pose.building = p.cur.buildPiece != 0xFF || (local && self_.buildMode);
+        if (pose.seatPose && vehId != 0xFFFF) {
+            // Hands are busy driving / holding on unless this seat can shoot
+            VehicleVisual vv;
+            if (vehicleVisual(vehId, vv) && !vehicleDef(vv.type).seatShoot[seat < MAX_SEATS ? seat : 0]) { pose.heldType = 0; pose.building = true; }
+        }
         pose.swing = p.swing;
         if (p.cur.emote) {
             const CosmeticDef* e = findCosmetic(p.loadout.emotes[(p.cur.emote - 1) % 6]);

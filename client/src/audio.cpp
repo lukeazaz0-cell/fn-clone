@@ -108,6 +108,25 @@ bool AudioSystem::init() {
     build(Sfx::Impact, [](Synth& s) { s.resize(0.2f); s.noiseBurst(0, 0.2f, 0.9f, 20, 0.4f); });
     build(Sfx::Blaster, [](Synth& s) { s.resize(0.2f); s.tone(0, 0.2f, 900, 300, 0.5f, 18, true); });
     build(Sfx::BlasterRepeater, [](Synth& s) { s.resize(0.12f); s.tone(0, 0.12f, 1000, 400, 0.4f, 25, true); });
+    build(Sfx::Horn, [](Synth& s) {
+        s.resize(0.55f);
+        for (int k = 0; k < 2; k++) {
+            s.tone(k * 0.28f, 0.22f, 392, 392, 0.3f, 1.5f, true);
+            s.tone(k * 0.28f, 0.22f, 494, 494, 0.25f, 1.5f, true);
+        }
+    });
+    build(Sfx::Boost, [](Synth& s) {
+        s.resize(0.7f);
+        s.noiseBurst(0, 0.7f, 0.9f, 3.5f, 0.08f);
+        s.noiseBurst(0, 0.35f, 0.5f, 7, 0.4f);
+        s.tone(0, 0.6f, 140, 420, 0.35f, 3.0f);
+    });
+    build(Sfx::Crash, [](Synth& s) {
+        s.resize(0.5f);
+        s.noiseBurst(0, 0.5f, 1.6f, 9, 0.25f);
+        s.tone(0, 0.25f, 90, 45, 1.0f, 12);
+        s.noiseBurst(0.04f, 0.2f, 0.6f, 20, 0.8f);
+    });
 
     // Recorded CC0 samples (Kenney) replace the synth versions when present.
     std::string dir = std::string(GetApplicationDirectory()) + "assets/sounds/";
@@ -145,6 +164,31 @@ bool AudioSystem::init() {
     };
     loopFile(Loop::Engine, "engine.ogg");
     loopFile(Loop::Ambience, "ambience.ogg");
+    loopFile(Loop::Vehicle, "engine.ogg");
+    // Synthesized loops: hoverboard hum and wheels rolling over ground
+    auto synthLoop = [&](Loop l, auto fn) {
+        Synth sy;
+        fn(sy);
+        loops_[(int)l] = make(sy);
+        loopOk_[(int)l] = true;
+    };
+    synthLoop(Loop::Hover, [](Synth& s) {
+        s.resize(1.0f);
+        for (size_t i = 0; i < s.s.size(); i++) {
+            float t = i / (float)RATE;
+            s.s[i] = 0.28f * std::sin(t * 2 * 3.14159265f * 110) + 0.14f * std::sin(t * 2 * 3.14159265f * 220 + std::sin(t * 12.566f) * 0.8f) +
+                     0.06f * std::sin(t * 2 * 3.14159265f * 330);
+        }
+    });
+    synthLoop(Loop::Roll, [](Synth& s) {
+        s.resize(1.0f);
+        float y = 0;
+        for (size_t i = 0; i < s.s.size(); i++) {
+            y += (s.noise() - y) * 0.05f;
+            float t = i / (float)RATE;
+            s.s[i] = y * 1.4f * (0.8f + 0.2f * std::sin(t * 2 * 3.14159265f * 6));
+        }
+    });
     return true;
 }
 

@@ -1406,11 +1406,105 @@ void GameMap::genSlipstreams() {
     mk({{0.27f, 0.24f}, {0.33f, 0.31f}, {0.42f, 0.38f}, {0.48f, 0.44f}}, 12);
 }
 
+// Parked vehicles: carts around residential areas, trolleys at shops, boards in the city and
+// industrial zones, quads in the rough terrain, roller balls scattered around, plus a few
+// along the roads. Uses its own random stream so it doesn't shift the rest of the map.
+void GameMap::genVehicles() {
+    Rng vr(seed ^ 0xCA75, 31);
+    auto clearSpot = [&](float x, float z, float r) {
+        if (x < 20 || z < 20 || x > W - 20 || z > W - 20) return false;
+        if (!isLand(x, z)) return false;
+        float h = heightAt(x, z);
+        if (h < WATER_LEVEL + 0.6f) return false;
+        for (int i = 0; i < 4; i++) {
+            float a = i * kPi / 2;
+            if (std::fabs(heightAt(x + std::cos(a) * r * 1.5f, z + std::sin(a) * r * 1.5f) - h) > 0.7f) return false;
+        }
+        AABB foot({x - r - 0.3f, h - 0.5f, z - r - 0.3f}, {x + r + 0.3f, h + 3.0f, z + r + 0.3f});
+        for (auto& sh : shapes)
+            if (sh.solid && sh.box.overlaps(foot)) return false;
+        for (auto& v : vehicleSpawns)
+            if (distXZ(v.pos, {x, 0, z}) < 5.0f) return false;
+        return true;
+    };
+    auto place = [&](VehicleType t, float cx, float cz, float rMin, float rMax) {
+        float r = vehicleDef(t).radius;
+        for (int attempt = 0; attempt < 16; attempt++) {
+            float a = vr.range(0, 2 * kPi), d = vr.range(rMin, rMax);
+            float x = cx + std::cos(a) * d, z = cz + std::sin(a) * d;
+            if (!clearSpot(x, z, r)) continue;
+            vehicleSpawns.push_back({{x, heightAt(x, z), z}, vr.range(-kPi, kPi), t});
+            return true;
+        }
+        return false;
+    };
+    for (auto& p : pois) {
+        float r0 = p.radius * 0.35f, r1 = p.radius * 1.15f;
+        switch (p.type) {
+            case PoiType::Estates: case PoiType::Mansion: case PoiType::LakeHouse: case PoiType::Lodge: case PoiType::Hamlet:
+                place(VehicleType::GolfCart, p.center.x, p.center.y, r0, r1);
+                place(VehicleType::GolfCart, p.center.x, p.center.y, r0, r1);
+                break;
+            case PoiType::Suburb: case PoiType::SnowLodge:
+                place(VehicleType::GolfCart, p.center.x, p.center.y, r0, r1);
+                place(VehicleType::Trolley, p.center.x, p.center.y, r0, r1);
+                place(VehicleType::CrashQuad, p.center.x, p.center.y, r0, r1);
+                break;
+            case PoiType::Mall: case PoiType::SmallTown:
+                for (int i = 0; i < 3; i++) place(VehicleType::Trolley, p.center.x, p.center.y, r0, r1);
+                place(VehicleType::GolfCart, p.center.x, p.center.y, r0, r1);
+                break;
+            case PoiType::FutureCity:
+                for (int i = 0; i < 3; i++) place(VehicleType::Hoverboard, p.center.x, p.center.y, r0, r1);
+                place(VehicleType::Trolley, p.center.x, p.center.y, r0, r1);
+                place(VehicleType::RollerBall, p.center.x, p.center.y, r0, r1);
+                break;
+            case PoiType::Industrial: case PoiType::Airfield: case PoiType::LanternVillage: case PoiType::PirateCove:
+                place(VehicleType::Hoverboard, p.center.x, p.center.y, r0, r1);
+                place(VehicleType::Hoverboard, p.center.x, p.center.y, r0, r1);
+                place(VehicleType::CrashQuad, p.center.x, p.center.y, r0, r1);
+                break;
+            case PoiType::DesertTown: case PoiType::Mines: case PoiType::Farm: case PoiType::Volcano: case PoiType::Junkyard:
+                place(VehicleType::CrashQuad, p.center.x, p.center.y, r0, r1);
+                place(VehicleType::CrashQuad, p.center.x, p.center.y, r0, r1);
+                place(VehicleType::Trolley, p.center.x, p.center.y, r0, r1);
+                break;
+            case PoiType::Temple:
+                place(VehicleType::RollerBall, p.center.x, p.center.y, r0, r1);
+                place(VehicleType::CrashQuad, p.center.x, p.center.y, r0, r1);
+                break;
+            default:
+                place(vr.uniform() < 0.5f ? VehicleType::RollerBall : VehicleType::GolfCart, p.center.x, p.center.y, r0, r1);
+                break;
+        }
+    }
+    // Parked beside the roads
+    for (size_t ri = 0; ri < roads.size(); ri++) {
+        const Road& rd = roads[ri];
+        Vec2 d = rd.b - rd.a;
+        float len = d.len();
+        if (len < 60 || ri % 3 != 0) continue;
+        Vec2 dir = d * (1.0f / len), side{-dir.y, dir.x};
+        for (float t = len * 0.5f; t < len - 30; t += 360.0f) {
+            Vec2 p = rd.a + dir * t + side * (rd.width * 0.5f + 3.0f);
+            VehicleType ty = vr.uniform() < 0.55f ? VehicleType::GolfCart : VehicleType::CrashQuad;
+            if (clearSpot(p.x, p.y, vehicleDef(ty).radius))
+                vehicleSpawns.push_back({{p.x, heightAt(p.x, p.y), p.y}, std::atan2(dir.x, dir.y), ty});
+        }
+    }
+    // Scattered in the wild
+    const VehicleType wild[] = {VehicleType::RollerBall, VehicleType::CrashQuad, VehicleType::Hoverboard, VehicleType::RollerBall};
+    for (int i = 0; i < 10; i++) {
+        Vec3 p = randomLandPoint(vr, 60.0f);
+        place(wild[i % 4], p.x, p.z, 0, 25);
+    }
+}
+
 void GameMap::generate(uint32_t s) {
     seed = s;
     rng_.reseed(s, 77);
     shapes.clear(); chests.clear(); floorLoot.clear(); ammoBoxes.clear();
-    slipstreams.clear(); vents.clear(); decor.clear(); roads.clear(); pois.clear();
+    slipstreams.clear(); vents.clear(); decor.clear(); roads.clear(); pois.clear(); vehicleSpawns.clear();
     genTerrain();
     genBiomes();
     genRoads();
@@ -1420,6 +1514,7 @@ void GameMap::generate(uint32_t s) {
     genNature();
     genStreetProps();
     genSlipstreams();
+    genVehicles();
     const POI* c = nullptr;
     for (auto& p : pois) if (p.type == PoiType::FutureCity) c = &p;
     warmupSpawnCenter = c ? Vec3{c->center.x, c->baseHeight, c->center.y} : Vec3{W / 2, 10, W / 2};

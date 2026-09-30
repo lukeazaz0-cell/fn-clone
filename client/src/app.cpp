@@ -226,7 +226,7 @@ void App::startOffline() {
     o.verbose = false;
     o.game.defaultBots = (int)offlineBots_;
     o.game.botDifficulty = (BotDifficulty)offlineDiff_;
-    o.game.warmupSeconds = 8;
+    o.game.warmupSeconds = settings_.autotestVehicles ? 1000 : 8;
     o.game.countdownSeconds = 5;
     o.game.minHumansToStart = 1;
     o.game.resetAfterMatch = true;
@@ -295,18 +295,42 @@ void App::run() {
     float autoT = 0;
     int autoShot = 0;
     const float shotTimes[] = {1.0f, 9.0f, 16.0f, 24.0f, 32.0f, 42.0f, 55.0f, 70.0f};
+    settings_.autotestVehicles = settings_.autotest && std::string(autotestEnv) == "vehicles";
     if (settings_.autotest) { offline_ = true; screen_ = Screen::Lobby; offlineBots_ = 40; offlineDiff_ = 1; offlineLoadout_.outfit = "outfit_arena_trooper"; }
+    if (settings_.autotestVehicles) offlineLoadout_.outfit = "";
 
+    const char* showroomEnv = std::getenv("STORM_SHOWROOM");
+    if (showroomEnv && *showroomEnv && std::string(showroomEnv) != "0") {
+        // Renders the vehicles from four angles, saves showroom_N.png and exits.
+        for (int frame = 0; frame < 4 * 20 && !WindowShouldClose(); frame++) {
+            BeginDrawing();
+            ClearBackground(ui::BG);
+            ui::beginFrame();
+            drawShowroom(frame / 20, 1.3f + frame * 0.01f);
+            EndDrawing();
+            if (frame % 20 == 19) TakeScreenshot(TextFormat("showroom_%d.png", frame / 20));
+        }
+        quit_ = true;
+    }
     while (!WindowShouldClose() && !quit_) {
         float dt = std::min(GetFrameTime(), 0.1f);
         if (settings_.autotest) {
             autoT += dt;
             if (autoT > 1.5f && screen_ == Screen::Lobby && !server_) startOffline();
-            if (autoShot < 8 && autoT > shotTimes[autoShot]) {
-                TakeScreenshot(TextFormat("autotest_%d.png", autoShot));
-                autoShot++;
+            if (settings_.autotestVehicles) {
+                // One screenshot every 4 s while the autopilot visits the vehicles
+                if (autoT > 8.0f + autoShot * 4.0f && autoShot < 30) {
+                    TakeScreenshot(TextFormat("autotest_vehicles_%02d.png", autoShot));
+                    autoShot++;
+                }
+                if (autoT > 130.0f) quit_ = true;
+            } else {
+                if (autoShot < 8 && autoT > shotTimes[autoShot]) {
+                    TakeScreenshot(TextFormat("autotest_%d.png", autoShot));
+                    autoShot++;
+                }
+                if (autoT > 75.0f) quit_ = true;
             }
-            if (autoT > 75.0f) quit_ = true;
         }
         pollFutures();
         if (statusTimer_ > 0) statusTimer_ -= dt;

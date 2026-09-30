@@ -96,6 +96,8 @@ private:
     void drawSettingsTab(Rectangle area);
     void drawMatchmaking();
     void drawPreview(Rectangle area, const Loadout& l);
+    // STORM_SHOWROOM=1: renders every vehicle (with riders) from a few angles for screenshots.
+    void drawShowroom(int view, float t);
     void drawStatus();
 };
 

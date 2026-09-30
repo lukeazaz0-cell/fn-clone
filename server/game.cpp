@@ -59,6 +59,7 @@ void Game::init(const GameConfig& c) {
     world.setMap(&map);
     chestOpened.assign(map.chests.size(), 0);
     ammoBoxOpened.assign(map.ammoBoxes.size(), 0);
+    spawnVehicles();
     rng_.reseed((uint64_t)std::chrono::steady_clock::now().time_since_epoch().count(), 3);
     setPhase(MatchPhase::Warmup);
     phaseTimer = cfg.warmupSeconds;
@@ -153,6 +154,7 @@ void Game::removePlayer(uint16_t id) {
     auto it = players.find(id);
     if (it == players.end()) return;
     Player& p = it->second;
+    exitVehicle(p);
     if (p.active() && (phase == MatchPhase::Playing || phase == MatchPhase::Bus)) eliminate(p, 0xFFFF, ItemType::None, 0);
     ByteWriter w;
     w.u8(EV_PLAYER_LEFT);
@@ -240,6 +242,7 @@ void Game::spawnWarmup(Player& p) {
     float a = rng_.range(0, 2 * kPi), d = rng_.range(0, poi->radius);
     float x = poi->center.x + std::cos(a) * d, z = poi->center.y + std::sin(a) * d;
     if (!map.isLand(x, z)) { x = poi->center.x; z = poi->center.y; }
+    exitVehicle(p);
     p.move = MoveState();
     p.move.pos = {x, world.groundHeight({x, 200, z}, PLAYER_RADIUS, 300) + 0.05f, z};
     p.move.mode = MoveMode::Ground;
@@ -272,6 +275,7 @@ void Game::resetWorldForMatch() {
     projectiles.clear();
     launchPads.clear();
     supplyDrops.clear();
+    spawnVehicles();
     chestOpened.assign(map.chests.size(), 0);
     ammoBoxOpened.assign(map.ammoBoxes.size(), 0);
     ByteWriter w;
@@ -707,6 +711,8 @@ void Game::tick(float dt) {
         }
     }
 
+    updateVehicles(dt);
+
     // --- phase logic
     switch (phase) {
         case MatchPhase::Warmup: {
@@ -776,6 +782,7 @@ void Game::tick(float dt) {
                     structures.clear(world);
                     world.setMap(&map);
                     items.clear();
+                    spawnVehicles();
                     ByteWriter w;
                     w.u8(EV_RESET_WORLD);
                     emit(w);
@@ -856,6 +863,24 @@ void Game::updateProjectiles(float dt) {
         bool head = false;
         uint16_t victim = raycastPlayers(pr.pos, dir, len, pr.owner, tp, head);
         bool hitPlayer = victim != 0xFFFF && (!h.hit || tp < h.t);
+        {
+            uint16_t ownVehicle = 0xFFFF;
+            auto oit = players.find(pr.owner);
+            if (oit != players.end()) ownVehicle = oit->second.vehicle;
+            float vt;
+            float limit = hitPlayer ? tp : (h.hit ? h.t : len);
+            int vi = raycastVehicles(pr.pos, dir, limit, ownVehicle, vt);
+            if (vi >= 0) {
+                Vec3 at = pr.pos + dir * vt;
+                if (ws.explosionRadius > 0) detonate(at);
+                else {
+                    damageVehicle(vehicles[vi], ws.damage, pr.owner);
+                    effects.push_back({FX_IMPACT, pr.owner, at, {}, (uint8_t)Material::Metal});
+                    pr.alive = false;
+                }
+                continue;
+            }
+        }
         if (hitPlayer) {
             Vec3 at = pr.pos + dir * tp;
             auto vit = players.find(victim);
@@ -932,7 +957,25 @@ void Game::simulatePlayer(Player& p, const InputCmd& in, float dt) {
     mi.buttons = in.buttons;
     if (p.emote && (in.fwd || in.right || (in.buttons & (IN_FIRE | IN_JUMP)))) p.emote = 0;
     if (p.emote) { mi.fwd = mi.right = 0; }
-    MoveEvents ev = stepMovement(p.move, mi, world, map, dt, mp);
+    uint16_t pressedNow = in.buttons & ~p.prevButtons;
+    MoveEvents ev;
+    bool justExited = false;
+    if (p.inVehicle()) {
+        if ((pressedNow & IN_INTERACT) || p.dbno) {
+            exitVehicle(p);
+            justExited = true;
+        } else {
+            driveVehicle(p, in, dt);
+            if (!p.inVehicle()) { p.prevButtons = in.buttons; return; }
+            bool canShoot = seatCanShoot(p);
+            if (canShoot) updateWeapon(p, in, dt);
+            else if (p.action == ACT_RELOAD || p.action == ACT_CONSUME) cancelAction(p);
+            p.prevButtons = in.buttons;
+            return;
+        }
+    } else {
+        ev = stepMovement(p.move, mi, world, map, dt, mp);
+    }
     if (ev.fallDamage > 0 && phase != MatchPhase::Warmup && phase != MatchPhase::Countdown)
         damagePlayer(p, ev.fallDamage, 0xFFFF, ItemType::None, KF_FALL, true);
     if (!p.alive) { p.prevButtons = in.buttons; return; }
@@ -956,8 +999,8 @@ void Game::simulatePlayer(Player& p, const InputCmd& in, float dt) {
     }
 
     bool canUseItems = p.move.mode == MoveMode::Ground || p.move.mode == MoveMode::Air;
-    uint16_t pressed = in.buttons & ~p.prevButtons;
-    if ((pressed & IN_INTERACT) && canUseItems) startInteract(p);
+    uint16_t pressed = pressedNow;
+    if ((pressed & IN_INTERACT) && canUseItems && !justExited) startInteract(p);
     if ((p.action == ACT_INTERACT || p.action == ACT_REVIVE) && !(in.buttons & IN_INTERACT)) cancelAction(p);
     if (canUseItems) updateWeapon(p, in, dt);
     else if (p.action == ACT_RELOAD || p.action == ACT_CONSUME) cancelAction(p);
@@ -1072,9 +1115,20 @@ void Game::startInteract(Player& p) {
                 consider(supplyDrops[i].pos + Vec3{0, 0.6f, 0}, 3, (uint32_t)i, INTERACT_RANGE + 0.5f);
         for (auto& [id, it] : items)
             if (std::fabs(it.pos.x - origin.x) < 4 && std::fabs(it.pos.z - origin.z) < 4) consider(it.pos + Vec3{0, 0.3f, 0}, 0, id, INTERACT_RANGE);
+        if (!p.bot)
+            for (auto& v : vehicles) {
+                if (!v.alive || std::fabs(v.st.pos.x - origin.x) > 6 || std::fabs(v.st.pos.z - origin.z) > 6) continue;
+                float reach = vehicleDef(v.type).radius + 1.8f;
+                // Slight preference so vehicles win over loot lying next to them
+                consider(v.st.pos + Vec3{0, 0.8f, 0}, 5, v.id, reach);
+            }
     }
     if (bestKind < 0) return;
     if (bestKind == 0) { pickup(p, best); return; }
+    if (bestKind == 5) {
+        if (Vehicle* v = findVehicle((uint16_t)best)) enterVehicle(p, *v);
+        return;
+    }
     p.action = bestKind == 4 ? ACT_REVIVE : ACT_INTERACT;
     p.actionTarget = best;
     p.actionTargetKind = bestKind;
@@ -1222,7 +1276,13 @@ uint16_t Game::raycastPlayers(const Vec3& o, const Vec3& d, float maxT, uint16_t
         if (id == ignore || !p.active() || p.move.mode == MoveMode::OnBus) continue;
         if (ignoreTeam != 0 && p.team == ignoreTeam && cfg.teamSize > 1) continue;
         float h = p.dbno ? 0.8f : (p.move.crouched ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT);
-        AABB box({p.move.pos.x - PLAYER_RADIUS, p.move.pos.y, p.move.pos.z - PLAYER_RADIUS},
+        float base = 0;
+        if (p.inVehicle()) {
+            const Vehicle* v = findVehicle(p.vehicle);
+            if (v && v->type == VehicleType::RollerBall) continue;
+            if (v && p.seat < MAX_SEATS && vehicleDef(v->type).seatPose[p.seat] == SEAT_SIT) base = 0.45f;
+        }
+        AABB box({p.move.pos.x - PLAYER_RADIUS, p.move.pos.y + base, p.move.pos.z - PLAYER_RADIUS},
                  {p.move.pos.x + PLAYER_RADIUS, p.move.pos.y + h, p.move.pos.z + PLAYER_RADIUS});
         float t;
         if (rayAABB(o, d, box, bestT, t) && t < bestT) {
@@ -1277,6 +1337,7 @@ void Game::fireGun(Player& p) {
     // Hit-scan pellets. Structures take the combined damage of all pellets that hit them.
     std::unordered_map<uint32_t, float> shapeDamage;
     std::unordered_map<uint16_t, std::pair<float, bool>> playerDamage;
+    std::unordered_map<int, float> vehicleDamage;
     for (int i = 0; i < ws.pellets; i++) {
         AimResult a = aim(p, ws.pellets > 1 ? std::max(spread, ws.spreadAds) : spread);
         float range = ws.range;
@@ -1284,8 +1345,14 @@ void Game::fireGun(Player& p) {
         float tp;
         bool head = false;
         uint16_t victim = raycastPlayers(a.origin, a.dir, wh.hit ? wh.t : range, p.id, tp, head);
+        float vt;
+        int vi = raycastVehicles(a.origin, a.dir, victim != 0xFFFF ? tp : (wh.hit ? wh.t : range), p.vehicle, vt);
         Vec3 end;
-        if (victim != 0xFFFF) {
+        if (vi >= 0) {
+            end = a.origin + a.dir * vt;
+            vehicleDamage[vi] += ws.damage * std::max(0.5f, ws.structureMul * 0.5f);
+            effects.push_back({FX_IMPACT, p.id, end, {}, (uint8_t)Material::Metal});
+        } else if (victim != 0xFFFF) {
             end = a.origin + a.dir * tp;
             float falloff = 1.0f;
             if (tp > ws.falloffStart) falloff = lerpf(1.0f, ws.falloffMin, clampf((tp - ws.falloffStart) / std::max(1.0f, ws.range - ws.falloffStart), 0, 1));
@@ -1311,6 +1378,8 @@ void Game::fireGun(Player& p) {
         auto it = players.find(vid);
         if (it != players.end()) damagePlayer(it->second, std::round(pd.first), p.id, h->type, pd.second ? KF_HEADSHOT : 0);
     }
+    for (auto& [vi, dmg] : vehicleDamage)
+        if (vi < (int)vehicles.size()) damageVehicle(vehicles[vi], std::round(dmg), p.id);
 }
 
 void Game::swingPickaxe(Player& p) {
@@ -1413,7 +1482,7 @@ void Game::handleAction(Player& p, const ClientAction& a) {
     switch (a.type) {
         case ActionType::SelectSlot: selectSlot(p, a.a); break;
         case ActionType::SetBuildMode:
-            if (p.dbno || p.eliminated) break;
+            if (p.dbno || p.eliminated || p.inVehicle()) break;
             if (a.a) {
                 if (p.action == ACT_RELOAD || p.action == ACT_CONSUME) cancelAction(p);
                 p.buildMode = true;
@@ -1455,6 +1524,9 @@ void Game::handleAction(Player& p, const ClientAction& a) {
             }
             break;
         }
+        case ActionType::ChangeSeat:
+            if (p.active() && p.inVehicle()) changeSeat(p);
+            break;
         case ActionType::Spectate: {
             if (!p.eliminated) break;
             std::vector<uint16_t> alive;
@@ -1473,6 +1545,10 @@ void Game::handleAction(Player& p, const ClientAction& a) {
 void Game::damagePlayer(Player& victim, float amount, uint16_t attacker, ItemType weapon, uint8_t killFlags, bool ignoreShield) {
     if (!victim.active() || amount <= 0) return;
     if (victim.move.mode == MoveMode::OnBus) return;
+    if (victim.inVehicle() && !(killFlags & KF_STORM)) {
+        Vehicle* v = findVehicle(victim.vehicle);
+        if (v && v->type == VehicleType::RollerBall) { damageVehicle(*v, amount, attacker); return; }
+    }
     Player* att = nullptr;
     if (attacker != 0xFFFF) {
         auto it = players.find(attacker);
@@ -1531,6 +1607,7 @@ void Game::damagePlayer(Player& victim, float amount, uint16_t attacker, ItemTyp
 }
 
 void Game::knock(Player& victim, uint16_t attacker, ItemType weapon, uint8_t flags) {
+    exitVehicle(victim);
     victim.dbno = true;
     victim.dbnoHealth = 100;
     victim.health = 1;
@@ -1548,6 +1625,7 @@ void Game::knock(Player& victim, uint16_t attacker, ItemType weapon, uint8_t fla
 
 void Game::eliminate(Player& victim, uint16_t killer, ItemType weapon, uint8_t flags) {
     if (!victim.active()) return;
+    exitVehicle(victim);
     if (killer == 0xFFFF && victim.lastAttacker != 0xFFFF && time - victim.lastAttackTime < 15.0f) killer = victim.lastAttacker;
     ByteWriter w;
     w.u8(EV_KILLFEED);
@@ -1683,6 +1761,13 @@ void Game::explode(const Vec3& pos, float radius, float damage, float structMul,
         }
     }
     (void)att;
+    for (auto& v : vehicles) {
+        if (!v.alive) continue;
+        float d = (v.st.pos + Vec3{0, 0.8f, 0} - pos).len();
+        if (d > radius + vehicleDef(v.type).radius) continue;
+        float f = 1.0f - 0.5f * clampf(d / (radius + 1.0f), 0, 1);
+        damageVehicle(v, std::round(damage * f * 1.5f), owner);
+    }
     for (auto& [id, p] : players) {
         if (!p.active()) continue;
         if (cfg.teamSize > 1 && p.team == team && p.id != owner) continue;

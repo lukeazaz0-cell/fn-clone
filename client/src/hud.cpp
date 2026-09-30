@@ -86,6 +86,15 @@ void GameClient::hudMinimap(Rectangle r, float meters) {
         Vector2 v = worldToMap(p.cur.pos, r, me, meters, false);
         DrawCircleV(v, 4 * ui::scale(), ui::GOOD);
     }
+    // Vehicles: small rounded markers (occupied ones are dimmed)
+    for (auto& [id, v] : vehicles_) {
+        if (!v.present) continue;
+        Vector2 m = worldToMap(v.cur.pos, r, me, meters, false);
+        float vs = 3.5f * ui::scale();
+        Color vc = (v.cur.flags & VF_DRIVER) ? Color{200, 200, 200, 140} : Color{255, 214, 90, 230};
+        DrawRectangleRounded({m.x - vs, m.y - vs * 0.7f, vs * 2, vs * 1.4f}, 0.5f, 4, Color{20, 20, 26, 200});
+        DrawRectangleRounded({m.x - vs + 1, m.y - vs * 0.7f + 1, vs * 2 - 2, vs * 1.4f - 2}, 0.5f, 4, vc);
+    }
     for (auto& poi : map_.pois) {
         if (!poi.major) continue;
         Vector2 v = worldToMap({poi.center.x, 0, poi.center.y}, r, me, meters, false);
@@ -439,6 +448,48 @@ void GameClient::hudResults() {
     }
 }
 
+void GameClient::hudVehicle() {
+    if (!inVehicle()) return;
+    VehicleVisual vv;
+    if (!vehicleVisual(self_.vehicle, vv)) return;
+    const VehicleDef& d = vehicleDef(vv.type);
+    float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
+    float s = ui::scale();
+    float pw = 320 * s, ph = 92 * s;
+    Rectangle r{W / 2 - pw / 2 + 60 * s, H - 64 * s - 20 * s - ph - 70 * s, pw, ph};
+    if (!d.seatShoot[self_.seat < MAX_SEATS ? self_.seat : 0]) r.y = H - ph - 28 * s;
+    ui::panel(r, Color{14, 18, 28, 200}, 0.14f);
+    ui::text(d.name, r.x + 14 * s, r.y + 10 * s, 18, WHITE);
+    const char* role = self_.seat == 0 ? (d.seatPose[0] == SEAT_STAND ? "RIDER" : "DRIVER") : "PASSENGER";
+    ui::textRight(role, r.x + r.width - 14 * s, r.y + 12 * s, 13, ui::ACCENT);
+    // Speed readout
+    float kmh = (driving_ ? predVeh_.vel.lenXZ() : vv.speed) * 3.6f;
+    ui::textRight(std::to_string((int)std::round(kmh)) + " km/h", r.x + r.width - 14 * s, r.y + 32 * s, 15, ui::TEXT);
+    // Hull bar
+    float bx = r.x + 14 * s, bw = r.width * 0.55f, bh = 10 * s, by = r.y + 38 * s;
+    DrawRectangleRounded({bx, by, bw, bh}, 0.5f, 4, Color{0, 0, 0, 150});
+    Color hc = vv.hp > 0.5f ? Color{120, 220, 120, 255} : vv.hp > 0.25f ? ui::WARN : ui::BAD;
+    DrawRectangleRounded({bx, by, bw * clampf(vv.hp, 0, 1), bh}, 0.5f, 4, hc);
+    ui::text("HULL", bx, by - 1 * s + bh + 2 * s, 11, ui::MUTED);
+    // Boost meter (driver only, vehicles that have boost)
+    if (self_.seat == 0 && d.boostSpeed > 0 && driving_) {
+        float bx2 = bx + bw + 14 * s, bw2 = r.x + r.width - 14 * s - bx2;
+        DrawRectangleRounded({bx2, by, bw2, bh}, 0.5f, 4, Color{0, 0, 0, 150});
+        Color bc = predVeh_.boosting ? Color{255, 170, 60, 255} : Color{90, 190, 255, 255};
+        DrawRectangleRounded({bx2, by, bw2 * clampf(predVeh_.boost, 0, 1), bh}, 0.5f, 4, bc);
+        ui::text("BOOST", bx2, by + bh + 1 * s, 11, ui::MUTED);
+    }
+    // Controls
+    std::string hint = "E exit";
+    if (d.seats > 1) hint += "   C switch seat";
+    if (self_.seat == 0) {
+        if (d.boostSpeed > 0) hint += "   Shift boost";
+        if (d.jumpVel > 0) hint += "   Space jump";
+        if (!d.seatShoot[0]) hint += "   LMB horn";
+    }
+    ui::text(hint, r.x + 14 * s, r.y + r.height - 22 * s, 12, ui::withAlpha(WHITE, 0.7f));
+}
+
 void GameClient::renderHud() {
     ui::beginFrame();
     float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
@@ -451,6 +502,7 @@ void GameClient::renderHud() {
     hudCenter();
     hudKillfeed();
     if (localControllable() || (haveSelf_ && self_.mode == MoveMode::OnBus)) hudBottom();
+    if (localControllable()) hudVehicle();
 
     // Top-right: minimap + stats
     float mm = 220 * s;

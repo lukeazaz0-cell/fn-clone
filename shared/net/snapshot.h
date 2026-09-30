@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "../game/items.h"
+#include "../game/vehicles.h"
 #include "protocol.h"
 
 namespace si {
@@ -29,6 +30,10 @@ struct SnapSelf {
     uint8_t placement = 0;
     float bloom = 0;
     uint8_t team = 0;
+    uint16_t vehicle = 0xFFFF;   // vehicle id, 0xFFFF = on foot
+    uint8_t seat = NO_SEAT;
+    uint8_t vehicleType = 0;
+    VehicleState veh;            // full vehicle state when driving (for prediction)
 };
 
 struct SnapGlobal {
@@ -57,6 +62,19 @@ struct SnapPlayer {
     uint8_t team = 0;
     uint8_t emote = 0;
     uint8_t buildPiece = 0xFF;
+    uint16_t vehicle = 0xFFFF;
+    uint8_t seat = NO_SEAT;
+};
+
+enum VehicleFlags : uint8_t { VF_BOOST = 1, VF_GROUND = 2, VF_DRIVER = 4, VF_WATER = 8 };
+
+struct SnapVehicle {
+    uint16_t id = 0;
+    uint8_t type = 0;
+    Vec3 pos;
+    float yaw = 0, pitch = 0, roll = 0;
+    uint8_t hp = 255;         // fraction of max hp * 255
+    uint8_t flags = 0;
 };
 
 struct SnapProjectile { uint32_t id; uint8_t type; Vec3 pos; };
@@ -75,6 +93,7 @@ struct Snapshot {
     std::vector<SnapPlayer> players;
     std::vector<SnapProjectile> projectiles;
     std::vector<SnapDrop> drops;
+    std::vector<SnapVehicle> vehicles;
     std::vector<SnapEffect> effects;
     std::vector<SnapEvent> events;
 };
@@ -86,6 +105,19 @@ inline ItemStack readStack(ByteReader& r) {
     if ((int)s.type >= (int)ItemType::Count) s.type = ItemType::None;
     if ((int)s.rarity >= (int)Rarity::Count) s.rarity = Rarity::Common;
     return s;
+}
+
+inline void writeVehicleState(ByteWriter& w, const VehicleState& v) {
+    w.vec3(v.pos); w.vec3(v.vel); w.f32(v.yaw); w.f32(v.pitch); w.f32(v.roll); w.f32(v.boost); w.f32(v.airTime);
+    w.u8((v.onGround ? 1 : 0) | (v.boosting ? 2 : 0) | (v.inWater ? 4 : 0)); w.u16(v.prevButtons);
+}
+inline VehicleState readVehicleState(ByteReader& r) {
+    VehicleState v;
+    v.pos = r.vec3(); v.vel = r.vec3(); v.yaw = r.f32(); v.pitch = r.f32(); v.roll = r.f32(); v.boost = r.f32(); v.airTime = r.f32();
+    uint8_t f = r.u8();
+    v.onGround = f & 1; v.boosting = f & 2; v.inWater = f & 4;
+    v.prevButtons = r.u16();
+    return v;
 }
 
 inline void writeSnapshot(ByteWriter& w, const Snapshot& s) {
@@ -102,6 +134,8 @@ inline void writeSnapshot(ByteWriter& w, const Snapshot& s) {
         w.u8(m.buildMat); w.u8(m.buildMode); w.u8(m.buildPiece); w.u8(m.buildRot);
         w.u8(m.action); w.f32(m.actionTime); w.f32(m.actionTotal);
         w.u16(m.kills); w.u16(m.spectating); w.f32(m.regenLeft); w.u8(m.placement); w.f32(m.bloom); w.u8(m.team);
+        w.u16(m.vehicle); w.u8(m.seat); w.u8(m.vehicleType);
+        if (m.vehicle != 0xFFFF && m.seat == 0) writeVehicleState(w, m.veh);
     }
     const SnapGlobal& g = s.g;
     w.u8((uint8_t)g.phase); w.f32(g.phaseTimer); w.u16(g.alive); w.u16(g.total); w.u8(g.teamSize);
@@ -113,11 +147,16 @@ inline void writeSnapshot(ByteWriter& w, const Snapshot& s) {
     for (auto& p : s.players) {
         w.u16(p.id); w.u16(p.flags); w.u8((uint8_t)p.mode); w.vec3(p.pos); w.angle(p.yaw); w.angle(p.pitch);
         w.u8(p.heldType); w.u8(p.heldRarity); w.u8(p.health); w.u8(p.shield); w.u8(p.team); w.u8(p.emote); w.u8(p.buildPiece);
+        w.u16(p.vehicle); w.u8(p.seat);
     }
     w.u16((uint16_t)s.projectiles.size());
     for (auto& p : s.projectiles) { w.u32(p.id); w.u8(p.type); w.vec3(p.pos); }
     w.u8((uint8_t)std::min<size_t>(255, s.drops.size()));
     for (size_t i = 0; i < s.drops.size() && i < 255; i++) { w.u32(s.drops[i].id); w.vec3(s.drops[i].pos); }
+    w.u16((uint16_t)s.vehicles.size());
+    for (auto& v : s.vehicles) {
+        w.u16(v.id); w.u8(v.type); w.vec3(v.pos); w.angle(v.yaw); w.angle(v.pitch); w.angle(v.roll); w.u8(v.hp); w.u8(v.flags);
+    }
     w.u16((uint16_t)s.effects.size());
     for (auto& e : s.effects) { w.u8(e.type); w.u16(e.player); w.vec3(e.a); w.vec3(e.b); w.u8(e.extra); }
     w.u16((uint16_t)s.events.size());
@@ -137,6 +176,8 @@ inline bool readSnapshot(ByteReader& r, Snapshot& s) {
         m.buildMat = r.u8(); m.buildMode = r.u8(); m.buildPiece = r.u8(); m.buildRot = r.u8();
         m.action = r.u8(); m.actionTime = r.f32(); m.actionTotal = r.f32();
         m.kills = r.u16(); m.spectating = r.u16(); m.regenLeft = r.f32(); m.placement = r.u8(); m.bloom = r.f32(); m.team = r.u8();
+        m.vehicle = r.u16(); m.seat = r.u8(); m.vehicleType = r.u8();
+        if (m.vehicle != 0xFFFF && m.seat == 0) m.veh = readVehicleState(r);
     }
     SnapGlobal& g = s.g;
     g.phase = (MatchPhase)r.u8(); g.phaseTimer = r.f32(); g.alive = r.u16(); g.total = r.u16(); g.teamSize = r.u8();
@@ -149,6 +190,7 @@ inline bool readSnapshot(ByteReader& r, Snapshot& s) {
     for (auto& p : s.players) {
         p.id = r.u16(); p.flags = r.u16(); p.mode = (MoveMode)r.u8(); p.pos = r.vec3(); p.yaw = r.angle(); p.pitch = r.angle();
         p.heldType = r.u8(); p.heldRarity = r.u8(); p.health = r.u8(); p.shield = r.u8(); p.team = r.u8(); p.emote = r.u8(); p.buildPiece = r.u8();
+        p.vehicle = r.u16(); p.seat = r.u8();
     }
     uint16_t npr = r.u16();
     s.projectiles.resize(r.ok() ? npr : 0);
@@ -156,6 +198,12 @@ inline bool readSnapshot(ByteReader& r, Snapshot& s) {
     uint8_t nd = r.u8();
     s.drops.resize(r.ok() ? nd : 0);
     for (auto& d : s.drops) { d.id = r.u32(); d.pos = r.vec3(); }
+    uint16_t nv = r.u16();
+    s.vehicles.resize(r.ok() ? nv : 0);
+    for (auto& v : s.vehicles) {
+        v.id = r.u16(); v.type = r.u8(); v.pos = r.vec3(); v.yaw = r.angle(); v.pitch = r.angle(); v.roll = r.angle(); v.hp = r.u8(); v.flags = r.u8();
+        if (v.type >= (uint8_t)VehicleType::Count) v.type = 0;
+    }
     uint16_t ne = r.u16();
     s.effects.resize(r.ok() ? ne : 0);
     for (auto& e : s.effects) { e.type = r.u8(); e.player = r.u16(); e.a = r.vec3(); e.b = r.vec3(); e.extra = r.u8(); }

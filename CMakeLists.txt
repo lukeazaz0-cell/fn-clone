@@ -42,6 +42,7 @@ add_library(storm_shared STATIC
   shared/game/map.cpp
   shared/game/building.cpp
   shared/game/movement.cpp
+  shared/game/vehicles.cpp
 )
 target_include_directories(storm_shared PUBLIC ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party ${CMAKE_SOURCE_DIR}/third_party/httplib)
 target_link_libraries(storm_shared PUBLIC Threads::Threads)
@@ -54,6 +55,7 @@ if(STORM_BUILD_SERVER OR STORM_BUILD_CLIENT OR STORM_BUILD_TESTS)
   add_library(storm_server_core STATIC
     server/game.cpp
     server/bots.cpp
+    server/vehicles_server.cpp
     server/netserver.cpp
     server/backend_link.cpp
     server/runner.cpp
@@ -118,6 +120,7 @@ if(STORM_BUILD_CLIENT)
     client/src/gfx.cpp
     client/src/models.cpp
     client/src/render_chars.cpp
+    client/src/render_vehicles.cpp
     client/src/hud.cpp
     client/src/menus.cpp
     client/src/ui.cpp

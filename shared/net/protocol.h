@@ -48,7 +48,7 @@ enum EventType : uint8_t {
 enum KillFlags : uint8_t { KF_HEADSHOT = 1, KF_KNOCKED = 2, KF_STORM = 4, KF_FALL = 8, KF_EXPLOSION = 16, KF_PICKAXE = 32 };
 enum DamageFlags : uint8_t { DF_SHIELD = 1, DF_HEADSHOT = 2, DF_STRUCTURE = 4, DF_KILL = 8 };
 
-enum EffectType : uint8_t { FX_SHOT = 1, FX_EXPLOSION = 2, FX_IMPACT = 3, FX_HARVEST = 4, FX_BUILD = 5 };
+enum EffectType : uint8_t { FX_SHOT = 1, FX_EXPLOSION = 2, FX_IMPACT = 3, FX_HARVEST = 4, FX_BUILD = 5, FX_HONK = 6, FX_CRASH = 7, FX_BOOST = 8 };
 
 enum ActionKind : uint8_t { ACT_NONE = 0, ACT_RELOAD, ACT_CONSUME, ACT_INTERACT, ACT_REVIVE, ACT_EQUIP };
 

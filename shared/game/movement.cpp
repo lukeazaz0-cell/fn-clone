@@ -28,7 +28,7 @@ MoveEvents stepMovement(MoveState& st, const MoveInput& in, const CollisionWorld
     MoveEvents ev;
     uint16_t pressed = in.buttons & ~st.prevButtons;
     st.prevButtons = in.buttons;
-    if (st.mode == MoveMode::OnBus || st.mode == MoveMode::Dead || st.mode == MoveMode::Spectate) return ev;
+    if (st.mode == MoveMode::OnBus || st.mode == MoveMode::Dead || st.mode == MoveMode::Spectate || st.mode == MoveMode::Vehicle) return ev;
 
     Vec3 wish = wishDir(in);
     float groundY = world.terrainHeight(st.pos.x, st.pos.z);

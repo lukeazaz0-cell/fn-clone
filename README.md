@@ -19,6 +19,14 @@ Most art is procedural low-poly geometry and every location and most cosmetics a
 - Biomes: grassland, forest, snow, desert, jungle, volcanic and beach, with roads, cars, trees, rocks, cacti and crops.
 - Slipstream wind tunnels, volcano vents, launch pads, gliding and redeploy after launches.
 - Drop-ship phase, skydiving (with a dive), glider deploy, swimming and fall damage.
+- **Vehicles**, about 80 parked around the island:
+  - **Fairway Cart**, a 4-seat golf cart. The driver honks and passengers can shoot.
+  - **Crash Quad**, a 2-seat quad bike. Its boost smashes through builds and bowls players over.
+  - **Skyboard**, a hoverboard. It floats over water, can boost and hop, and the rider can shoot.
+  - **Trolley**, a shopping cart for a pusher and a passenger. It gets very fast downhill.
+  - **Roller Ball**, a bouncy armoured ball. It shields its rider and can jump and boost.
+
+  All vehicles have hull health and can be destroyed. They launch off ramps and hills. Driving uses the same client prediction as walking.
 - Storm with 8 shrinking phases, storm damage and a supply drop on some phases.
 - Chests, ammo boxes, floor loot and supply drops. 5 rarities, 10 guns (AR, burst, scoped, pump, tactical, SMG, pistol, bolt sniper, rocket launcher, minigun), grenades, impulse grenades, bandages, medkits, small and large shields, regen soda, mega flask and launch pads.
 - Hit-scan weapons with bloom, first-shot accuracy, headshots, damage falloff, pellets, burst fire and ADS zoom. Rockets and grenades are simulated projectiles.
@@ -120,13 +128,14 @@ Without `--backend` the server runs standalone and accepts anyone. Players join 
 | WASD, Space, Shift, Ctrl | Move, jump/glide, sprint, crouch |
 | Mouse, LMB, RMB | Aim, fire/place, aim down sights |
 | 1–5, F, mouse wheel | Inventory slots, pickaxe |
-| E | Interact (hold for chests and revives) |
+| E | Interact (hold for chests and revives), enter or exit a vehicle |
 | R | Reload / rotate the build piece |
 | Q, Z, X, C, V | Build mode, wall, floor, ramp, roof |
 | RMB (build mode) | Change material |
 | G | Edit the targeted piece (door, window, arch, hole, rotate) |
 | Tab / M / B | Inventory / map / emote wheel (1–6) |
 | Esc | Menu |
+| In a vehicle | W/S throttle and brake, A/D steer (boards and balls follow the camera), Shift boost, Space jump, C switch seat, LMB horn (driver) |
 
 ## Project layout
 ```

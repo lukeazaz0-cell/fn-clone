@@ -13,6 +13,7 @@
 #include "../shared/game/items.h"
 #include "../shared/game/map.h"
 #include "../shared/game/movement.h"
+#include "../shared/game/vehicles.h"
 #include "../shared/game/world.h"
 #include "../shared/net/protocol.h"
 
@@ -124,6 +125,11 @@ struct Player {
 
     BotBrain brain;
 
+    uint16_t vehicle = 0xFFFF;     // vehicle id while riding
+    uint8_t seat = NO_SEAT;
+    float lastRamTime = -10;       // last time a vehicle bowled this player over
+    bool inVehicle() const { return vehicle != 0xFFFF; }
+
     Vec3 eye() const { return move.pos + Vec3{0, move.crouched ? 1.15f : EYE_HEIGHT, 0}; }
     const ItemStack* held() const { return selected >= 1 && selected <= INVENTORY_SLOTS ? &inv[selected - 1] : nullptr; }
     ItemStack* held() { return selected >= 1 && selected <= INVENTORY_SLOTS ? &inv[selected - 1] : nullptr; }
@@ -155,6 +161,19 @@ struct SupplyDrop {
     Vec3 pos;       // current
     float groundY;
     bool opened = false;
+};
+
+struct Vehicle {
+    uint16_t id = 0;
+    VehicleType type = VehicleType::GolfCart;
+    VehicleState st;
+    float hp = 100, maxHp = 100;
+    uint16_t seats[MAX_SEATS] = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
+    bool alive = true;
+    float honkCooldown = 0;
+    float crashCooldown = 0;
+    uint16_t lastDamager = 0xFFFF;
+    bool hasDriver() const { return seats[0] != 0xFFFF; }
 };
 
 struct StormState {
@@ -190,6 +209,7 @@ public:
     std::vector<Projectile> projectiles;
     std::vector<Vec3> launchPads;
     std::vector<SupplyDrop> supplyDrops;
+    std::vector<Vehicle> vehicles;
     StormState storm;
     MatchPhase phase = MatchPhase::Warmup;
     float phaseTimer = 0;
@@ -226,6 +246,8 @@ public:
     int botCount() const;
     int aliveCount() const;
     int aliveTeams() const;
+    Vehicle* findVehicle(uint16_t id);
+    const Vehicle* findVehicle(uint16_t id) const;
 
     // Serializers used when a new client joins (full state) and for broadcast.
     void writeFullStateEvents(std::vector<std::vector<uint8_t>>& out) const;
@@ -236,6 +258,7 @@ private:
     uint32_t nextItemId_ = 1, nextStructId_ = 1, nextProjId_ = 1, nextDropId_ = 1;
     Rng rng_;
     float botAccum_ = 0;
+    float vehAccum_ = 0;
 
     void emit(const ByteWriter& w, int target = -1) { if (emitEvent) emitEvent(w.buf, target); }
     void setPhase(MatchPhase p);
@@ -250,6 +273,20 @@ private:
     void updateStructures(float dt);
     void checkEnd();
     void finishMatch();
+
+    // Vehicles (vehicles_server.cpp)
+    void spawnVehicles();
+    void updateVehicles(float dt);
+    void driveVehicle(Player& p, const InputCmd& in, float dt);
+    void afterVehicleStep(Vehicle& v, const VehicleEvents& ev, float dt);
+    void syncSeats(Vehicle& v);
+    bool enterVehicle(Player& p, Vehicle& v);
+    void exitVehicle(Player& p);
+    void changeSeat(Player& p);
+    bool seatCanShoot(const Player& p) const;
+    void damageVehicle(Vehicle& v, float amount, uint16_t attacker);
+    void destroyVehicle(Vehicle& v, uint16_t attacker);
+    int raycastVehicles(const Vec3& o, const Vec3& d, float maxT, uint16_t ignoreVehicle, float& tOut) const;
 
     void simulatePlayer(Player& p, const InputCmd& in, float dt);
     void updateWeapon(Player& p, const InputCmd& in, float dt);

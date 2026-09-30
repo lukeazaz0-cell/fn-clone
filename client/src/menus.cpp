@@ -63,6 +63,75 @@ void App::drawStatus() {
     ui::textCentered(status_, W / 2, r.y + ui::px(12), 20, ui::withAlpha(ui::TEXT, std::min(1.0f, statusTimer_)));
 }
 
+void App::drawShowroom(int view, float t) {
+    float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
+    Camera3D cam{};
+    cam.up = {0, 1, 0};
+    cam.fovy = 38;
+    cam.projection = CAMERA_PERSPECTIVE;
+    const float spacing = 4.2f;
+    const si::Vec3 camPos[] = {{-6, 4.5f, 12}, {9, 3.5f, -9}, {-2, 1.8f, 5.5f}, {10.5f, 2.2f, 4.5f}};
+    const si::Vec3 camTgt[] = {{8, 0.6f, 0}, {8, 0.6f, 0}, {0.5f, 0.9f, 0}, {12.6f, 0.9f, 0}};
+    int v = view % 4;
+    cam.position = V(camPos[v]);
+    cam.target = V(camTgt[v]);
+    previewLight_.shadows = false;
+    previewLight_.drawSky(cam, t);
+    BeginMode3D(cam);
+    previewLight_.begin(cam, t);
+    BeginShaderMode(previewLight_.shader);
+    setDrawMaterial(M_GRASS);
+    drawBox({8, -0.5f, 0}, {40, 0.5f, 20}, Basis(), Color{110, 170, 80, 255});
+    setDrawMaterial(M_ASPHALT);
+    drawBox({8, 0.005f, 0}, {14, 0.01f, 3.2f}, Basis(), Color{90, 92, 98, 255});
+    Loadout riders[] = {Loadout(), Loadout(), Loadout(), Loadout(), Loadout()};
+    riders[1].outfit = "outfit_arena_trooper";
+    if (std::getenv("STORM_SHOWROOM_TROOPER")) for (auto& r : riders) r.outfit = "outfit_arena_trooper";
+    for (int i = 0; i < (int)VehicleType::Count; i++) {
+        VehicleVisual vv;
+        vv.type = (VehicleType)i;
+        vv.id = (uint16_t)i;
+        vv.pos = {i * spacing, 0, 0};
+        vv.yaw = 0.9f + (view == 1 ? kPi : 0);
+        vv.wheelSpin = t * 3;
+        vv.steer = std::sin(t) * 0.5f;
+        vv.boosting = i == 1 || i == 2;
+        vv.speed = 8;
+        vv.occupied = true;
+        vv.hp = i == 3 ? 0.2f : 1.0f;
+        drawVehicle(vv, t);
+        const VehicleDef& d = vehicleDef(vv.type);
+        VehicleState st;
+        st.pos = vv.pos;
+        st.yaw = vv.yaw;
+        for (int seat = 0; seat < d.seats; seat++) {
+            if (i == 0 && seat == 3) continue;
+            CharPose p;
+            p.pos = vehicleSeatPos(st, vv.type, seat);
+            p.yaw = vv.yaw;
+            p.seatPose = d.seatPose[seat];
+            p.steering = seat == 0 && !d.seatShoot[0];
+            p.building = !d.seatShoot[seat];
+            p.heldType = d.seatShoot[seat] ? (uint8_t)ItemType::AssaultRifle : 0;
+            p.animTime = t;
+            drawCharacter(p, riders[(i + seat) % 5], t);
+        }
+    }
+    for (int i = 0; i < (int)VehicleType::Count; i++) {
+        VehicleVisual vv;
+        vv.type = (VehicleType)i;
+        vv.id = (uint16_t)i;
+        vv.pos = {i * spacing, 0, 0};
+        vv.yaw = 0.9f + (view == 1 ? kPi : 0);
+        drawVehicleShell(vv, t);
+    }
+    EndShaderMode();
+    previewLight_.endObjects();
+    EndMode3D();
+    ui::textCentered("Vehicle showroom", W / 2, 16, 20, WHITE);
+    (void)H;
+}
+
 void App::drawPreview(Rectangle area, const Loadout& l) {
     spin_ += GetFrameTime() * 0.6f;
     int w = std::max(16, (int)area.width), h = std::max(16, (int)area.height);

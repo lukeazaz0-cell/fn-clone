@@ -8,6 +8,7 @@
 #include "shared/game/building.h"
 #include "shared/game/cosmetics.h"
 #include "shared/game/map.h"
+#include "shared/game/vehicles.h"
 #include "shared/game/world.h"
 
 namespace client {
@@ -77,6 +78,9 @@ void drawBox(const si::Vec3& center, const si::Vec3& half, const Basis& b, Color
 void drawAABB(const AABB& box, Color c);
 void drawRampShape(const AABB& box, uint8_t dir, Color c);
 void drawPyramid(const AABB& box, Color c);
+// Smooth ellipsoid / capped cylinder (spin rotates the facets, e.g. for wheels).
+void drawSphere(const si::Vec3& center, const si::Vec3& radii, const Basis& b, Color c, int rings = 10, int segs = 16);
+void drawCylinder(const si::Vec3& center, const si::Vec3& axis, float radius, float halfLen, Color c, int segs = 14, float spin = 0);
 
 // Static world geometry split into chunks so destroyed props only rebuild a small mesh.
 class WorldRenderer {
@@ -132,11 +136,32 @@ struct CharPose {
     uint8_t emote = 0;        // emote animation id (shape), 0 none
     float swing = 0;          // pickaxe swing phase 0..1
     bool building = false;
+    uint8_t seatPose = 0;     // SEAT_SIT / SEAT_STAND while riding a vehicle
+    bool steering = false;    // hands forward on a wheel / handlebars
 };
 void drawCharacter(const CharPose& p, const Loadout& l, float time);
 void drawGlider(const si::Vec3& pos, float yaw, const Loadout& l);
 void drawHeldItem(const si::Vec3& hand, const Basis& b, uint8_t type, uint8_t rarity, const Loadout& l, float swing);
 
 Color materialColor(si::Material m);
+
+// Vehicles (render_vehicles.cpp)
+struct VehicleVisual {
+    VehicleType type = VehicleType::GolfCart;
+    uint16_t id = 0;
+    si::Vec3 pos;
+    float yaw = 0, pitch = 0, roll = 0;
+    float wheelSpin = 0;      // accumulated wheel rotation (radians)
+    float speed = 0;
+    float steer = 0;          // -1..1 visual front-wheel steering
+    bool boosting = false;
+    bool occupied = false;
+    float hp = 1.0f;          // fraction of max
+    Basis ballSpin;           // accumulated rolling orientation (roller ball)
+};
+Basis vehicleBasis(const VehicleVisual& v);
+void drawVehicle(const VehicleVisual& v, float time);
+// Translucent parts (roller ball shell); draw after the riders.
+void drawVehicleShell(const VehicleVisual& v, float time);
 
 } // namespace client

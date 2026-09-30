@@ -9,6 +9,7 @@
 
 #include "../common/math.h"
 #include "defs.h"
+#include "vehicles.h"
 #include "world.h"
 
 namespace si {
@@ -63,6 +64,8 @@ struct Decor {
 
 struct Road { Vec2 a, b; float width; };
 
+struct VehicleSpawn { Vec3 pos; float yaw; VehicleType type; };
+
 class GameMap {
 public:
     uint32_t seed = 0;
@@ -78,6 +81,7 @@ public:
     std::vector<Vent> vents;
     std::vector<Decor> decor;
     std::vector<Road> roads;
+    std::vector<VehicleSpawn> vehicleSpawns;
     Vec3 warmupSpawnCenter;       // players spawn around here during warmup
 
     void generate(uint32_t seed);
@@ -98,6 +102,7 @@ private:
     void genPois();
     void genNature();
     void genSlipstreams();
+    void genVehicles();
 
     // building toolkit
     uint32_t box(const Vec3& mn, const Vec3& mx, Material m, Color4 c, float hp = 200, bool destructible = true, uint8_t style = 0);

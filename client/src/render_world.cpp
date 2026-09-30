@@ -67,6 +67,63 @@ void drawBox(const si::Vec3& c, const si::Vec3& h, const Basis& b0, Color col) {
     rlEnd();
 }
 
+// Quad with its winding chosen so it faces `out` (works for any basis handedness).
+static void quadOut(const si::Vec3& a, const si::Vec3& b, const si::Vec3& c, const si::Vec3& d, const si::Vec3& na,
+                    const si::Vec3& nb, const si::Vec3& nc, const si::Vec3& nd, const si::Vec3& out) {
+    bool flip = (b - a).cross(c - a).dot(out) < 0;
+    const si::Vec3* P[4] = {&a, &b, &c, &d};
+    const si::Vec3* N[4] = {&na, &nb, &nc, &nd};
+    for (int k = 0; k < 4; k++) {
+        int i = flip ? 3 - k : k;
+        rlNormal3f(N[i]->x, N[i]->y, N[i]->z);
+        vtx(*P[i]);
+    }
+}
+
+void drawSphere(const si::Vec3& c, const si::Vec3& radii, const Basis& b, Color col, int rings, int segs) {
+    rlSetTexture(gAtlasTex);
+    rlBegin(RL_QUADS);
+    rlColor4ub(col.r, col.g, col.b, col.a);
+    auto dirAt = [&](int i, int j) {
+        float lat = -kPi / 2 + kPi * i / rings, lon = 2 * kPi * j / segs;
+        return si::Vec3{std::cos(lat) * std::cos(lon), std::sin(lat), std::cos(lat) * std::sin(lon)};
+    };
+    auto pt = [&](const si::Vec3& d) { return c + b.r * (d.x * radii.x) + b.u * (d.y * radii.y) + b.f * (d.z * radii.z); };
+    auto nrm = [&](const si::Vec3& d) {
+        return (b.r * (d.x / radii.x) + b.u * (d.y / radii.y) + b.f * (d.z / radii.z)).norm();
+    };
+    for (int i = 0; i < rings; i++)
+        for (int j = 0; j < segs; j++) {
+            si::Vec3 d0 = dirAt(i, j), d1 = dirAt(i, j + 1), d2 = dirAt(i + 1, j + 1), d3 = dirAt(i + 1, j);
+            si::Vec3 mid = (pt(d0) + pt(d2)) * 0.5f;
+            quadOut(pt(d0), pt(d1), pt(d2), pt(d3), nrm(d0), nrm(d1), nrm(d2), nrm(d3), mid - c);
+        }
+    rlEnd();
+}
+
+void drawCylinder(const si::Vec3& c, const si::Vec3& axis, float radius, float halfLen, Color col, int segs, float spin) {
+    si::Vec3 a = axis.norm();
+    si::Vec3 ref = std::fabs(a.y) < 0.9f ? si::Vec3{0, 1, 0} : si::Vec3{1, 0, 0};
+    si::Vec3 u = a.cross(ref).norm(), v = a.cross(u).norm();
+    auto ring = [&](int j) {
+        float t = spin + 2 * kPi * j / segs;
+        return u * std::cos(t) + v * std::sin(t);
+    };
+    rlSetTexture(gAtlasTex);
+    rlBegin(RL_QUADS);
+    rlColor4ub(col.r, col.g, col.b, col.a);
+    si::Vec3 e0 = c - a * halfLen, e1 = c + a * halfLen;
+    for (int j = 0; j < segs; j++) {
+        si::Vec3 r0 = ring(j), r1 = ring(j + 1);
+        quadOut(e0 + r0 * radius, e0 + r1 * radius, e1 + r1 * radius, e1 + r0 * radius, r0, r1, r1, r0, (r0 + r1) * 0.5f);
+        // caps as thin quads to the centre
+        si::Vec3 na = a * -1.0f;
+        quadOut(e0, e0 + r0 * radius, e0 + r1 * radius, e0, na, na, na, na, na);
+        quadOut(e1, e1 + r0 * radius, e1 + r1 * radius, e1, a, a, a, a, a);
+    }
+    rlEnd();
+}
+
 void drawAABB(const AABB& box, Color c) { drawBox(box.center(), box.size() * 0.5f, Basis(), c); }
 
 void drawRampShape(const AABB& b, uint8_t dir, Color col) {

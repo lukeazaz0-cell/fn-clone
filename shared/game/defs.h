@@ -4,7 +4,7 @@
 
 namespace si {
 
-constexpr int PROTOCOL_VERSION = 4;
+constexpr int PROTOCOL_VERSION = 5;
 constexpr float SIM_DT = 1.0f / 60.0f;      // fixed movement step (client prediction + server)
 constexpr float SERVER_TICK_DT = 1.0f / 30.0f;
 constexpr int MAX_PLAYERS = 100;
@@ -111,7 +111,7 @@ enum class MatchPhase : uint8_t { Warmup = 0, Countdown, Bus, Playing, Ended };
 constexpr const char* PHASE_NAMES[] = {"warmup", "countdown", "bus", "playing", "ended"};
 
 // Player movement modes
-enum class MoveMode : uint8_t { Ground = 0, Air, OnBus, Skydive, Glide, Swim, Dead, Spectate };
+enum class MoveMode : uint8_t { Ground = 0, Air, OnBus, Skydive, Glide, Swim, Dead, Spectate, Vehicle };
 
 // Player status flags (network)
 enum PlayerFlags : uint16_t {
@@ -160,6 +160,7 @@ enum class ActionType : uint8_t {
     ToggleGlide,
     DropMats,       // a = material, b = amount/10
     Spectate,       // cycle spectate target
+    ChangeSeat,     // move to the next free seat of the current vehicle
 };
 
 enum class BotDifficulty : uint8_t { Easy = 0, Medium = 1, Hard = 2, Insane = 3 };

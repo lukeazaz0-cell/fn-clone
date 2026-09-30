@@ -24,6 +24,7 @@ struct Settings {
     bool invertY = false;
     bool shadows = true;
     bool autotest = false;          // scripted run for screenshots/CI (STORM_AUTOTEST)
+    bool autotestVehicles = false;  // STORM_AUTOTEST=vehicles: walk to vehicles and drive them
     std::string backendUrl = "http://127.0.0.1:8080";
     std::string lastUser;
 };
@@ -44,6 +45,20 @@ struct RemotePlayer {
     float swing = 0;
     float stepTimer = 0;
     std::vector<si::Vec3> trail;
+};
+
+struct ClientVehicle {
+    uint16_t id = 0;
+    struct Sample { float t; SnapVehicle s; };
+    std::deque<Sample> buf;
+    SnapVehicle cur;         // interpolated
+    bool present = false;
+    bool init = false;
+    float speed = 0;
+    float wheelSpin = 0;
+    float steer = 0;
+    si::Vec3 lastPos;
+    Basis ballSpin;
 };
 
 struct ClientItem { uint32_t id; ItemStack stack; si::Vec3 pos; float spawnTime; };
@@ -91,6 +106,7 @@ private:
     // replicated state
     std::map<uint16_t, RemotePlayer> players_;
     std::map<uint32_t, ClientItem> items_;
+    std::map<uint16_t, ClientVehicle> vehicles_;
     std::vector<uint8_t> chestOpened_, ammoBoxOpened_;
     std::vector<si::Vec3> launchPads_;
     struct Drop { si::Vec3 pos; float groundY; bool opened; };
@@ -114,6 +130,25 @@ private:
     uint16_t actionSeq_ = 0;
     float accum_ = 0;
     si::Vec3 smoothOffset_;
+    // vehicle prediction (while driving)
+    VehicleState predVeh_;
+    bool driving_ = false;
+    uint16_t drivingId_ = 0xFFFF;
+    VehicleType drivingType_ = VehicleType::GolfCart;
+    si::Vec3 vehSmooth_;
+    float vehYawSmooth_ = 0;
+    float vehSteerVis_ = 0;
+    float vehWheelSpin_ = 0;
+    Basis vehBallSpin_;
+    bool vehLanded_ = false;
+    // vehicle autotest autopilot
+    uint16_t apTarget_ = 0xFFFF;
+    float apDrive_ = 0, apStuck_ = 0;
+    si::Vec3 apLastPos_;
+    uint32_t apDoneTypes_ = 0;
+    float apTargetTime_ = 0;
+    std::vector<uint16_t> apSkip_;
+    void autopilotVehicles(InputCmd& in);
     float camYaw_ = 0, camPitch_ = 0;
     uint16_t buttonsHeld_ = 0;
     bool jumpQueued_ = false;
@@ -154,6 +189,10 @@ private:
     void updateInterpolation(float dt);
     void updateEffects(float dt);
     void computeInteractPrompt();
+    void updateVehicleAudio(float dt);
+    // Current visual state of a vehicle (predicted when we drive it, interpolated otherwise).
+    bool vehicleVisual(uint16_t id, VehicleVisual& out) const;
+    bool inVehicle() const { return haveSelf_ && self_.vehicle != 0xFFFF && (self_.flags & PF_ALIVE); }
     si::Vec3 viewPos() const;
     bool localControllable() const;
     const RemotePlayer* spectateTarget() const;
@@ -165,6 +204,7 @@ private:
     void renderItems();
     void renderStorm();
     void renderBus();
+    void renderVehicles(bool shellPass);
     void renderEffects();
     void renderBuildPreview();
     void renderSlipstreams();
@@ -179,6 +219,7 @@ private:
     void hudEmoteWheel();
     void hudPause();
     void hudResults();
+    void hudVehicle();
     Vector2 worldToMap(const si::Vec3& p, Rectangle r, si::Vec3 center, float meters, bool whole) const;
     std::string playerName(uint16_t id) const;
 };

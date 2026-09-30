@@ -4,6 +4,7 @@
 #include <cstdlib>
 
 #include "server/game.h"
+#include "shared/net/snapshot.h"
 
 using namespace si;
 
@@ -106,9 +107,119 @@ static size_t testMatch(int bots, int teamSize) {
     return peakStructures;
 }
 
+// Drives one vehicle of each type through the real server input path: walk up, press E,
+// hold forward (and boost where available), then press E again to get out.
+static void testVehicles() {
+    Game g;
+    GameConfig cfg;
+    cfg.minHumansToStart = 5;   // stay in warmup
+    cfg.warmupSeconds = 1000;
+    g.init(cfg);
+    int counts[(int)VehicleType::Count] = {0};
+    for (auto& v : g.vehicles) counts[(int)v.type]++;
+    std::printf("vehicles: %zu (cart %d, quad %d, board %d, trolley %d, ball %d)\n", g.vehicles.size(), counts[0], counts[1], counts[2],
+                counts[3], counts[4]);
+    CHECK(g.vehicles.size() >= 40);
+    for (int c : counts) CHECK(c >= 3);
+
+    Player* p = g.addPlayer("driver", "", Loadout(), false);
+    CHECK(p != nullptr);
+    if (!p) return;
+    uint32_t seq = 0;
+    auto run = [&](int8_t fwd, uint16_t buttons, int frames, float yaw) {
+        for (int i = 0; i < frames; i++) {
+            InputCmd in;
+            in.seq = ++seq;
+            in.fwd = fwd;
+            in.yaw = yaw;
+            in.buttons = buttons;
+            g.queueInput(*p, in);
+            g.tick(SIM_DT); // one input per tick keeps the test simple
+        }
+    };
+    for (int t = 0; t < (int)VehicleType::Count; t++) {
+        Vehicle* target = nullptr;
+        for (auto& v : g.vehicles)
+            if ((int)v.type == t && v.alive && !v.hasDriver() && v.st.pos.y > 2.0f) { target = &v; break; }
+        CHECK(target != nullptr);
+        if (!target) continue;
+        uint16_t vid = target->id;
+        // Stand beside it facing it
+        Vec3 side = target->st.pos + yawRight(target->st.yaw) * (vehicleDef(target->type).radius + 1.0f);
+        p->move = MoveState();
+        p->move.pos = side;
+        p->move.pos.y = g.world.groundHeight(side + Vec3{0, 2, 0}, PLAYER_RADIUS, side.y + 2);
+        p->move.mode = MoveMode::Ground;
+        float face = yawFromDir(target->st.pos - side);
+        run(0, 0, 2, face);
+        run(0, IN_INTERACT, 1, face);
+        run(0, 0, 1, face);
+        CHECK(p->vehicle == vid);
+        CHECK(p->seat == 0);
+        CHECK(p->move.mode == MoveMode::Vehicle);
+        Vehicle* v = g.findVehicle(vid);
+        if (!v || p->vehicle != vid) continue;
+        Vec3 start = v->st.pos;
+        float yaw = v->st.yaw;
+        uint16_t boost = vehicleDef(v->type).boostSpeed > 0 ? IN_SPRINT : 0;
+        run(1, boost, 150, yaw);
+        v = g.findVehicle(vid);
+        float moved = v ? distXZ(v->st.pos, start) : 0;
+        std::printf("  %-12s moved %.1f m in 2.5 s (hp %.0f)\n", vehicleDef((VehicleType)t).name, moved, v ? v->hp : 0.0f);
+        CHECK(moved > 6.0f);
+        if (v) CHECK(distXZ(p->move.pos, v->st.pos) < 2.0f); // rider stays in the seat
+        run(0, 0, 40, yaw);
+        run(0, IN_INTERACT, 1, yaw);
+        run(0, 0, 1, yaw);
+        CHECK(p->vehicle == 0xFFFF);
+        CHECK(p->move.mode != MoveMode::Vehicle);
+        if (v) CHECK(!v->hasDriver());
+    }
+
+    // Prediction depends on the step being deterministic
+    CollisionWorld& w = g.world;
+    VehicleState a;
+    a.pos = g.vehicles[0].st.pos;
+    a.yaw = 0.3f;
+    VehicleState b = a;
+    MoveInput mi;
+    mi.fwd = 1;
+    mi.right = 1;
+    mi.buttons = IN_SPRINT;
+    for (int i = 0; i < 200; i++) {
+        stepVehicle(a, VehicleType::CrashQuad, mi, true, w, SIM_DT);
+        stepVehicle(b, VehicleType::CrashQuad, mi, true, w, SIM_DT);
+    }
+    CHECK(a.pos.x == b.pos.x && a.pos.y == b.pos.y && a.pos.z == b.pos.z && a.yaw == b.yaw);
+
+    // Snapshot round trip with vehicles and a driving player
+    Snapshot snap;
+    snap.hasSelf = true;
+    snap.self.vehicle = 7;
+    snap.self.seat = 0;
+    snap.self.vehicleType = (uint8_t)VehicleType::Hoverboard;
+    snap.self.veh = a;
+    SnapVehicle sv;
+    sv.id = 7; sv.type = 2; sv.pos = {1, 2, 3}; sv.yaw = 1.0f; sv.hp = 200; sv.flags = VF_BOOST;
+    snap.vehicles.push_back(sv);
+    SnapPlayer sp;
+    sp.id = 3; sp.vehicle = 7; sp.seat = 1;
+    snap.players.push_back(sp);
+    ByteWriter bw;
+    writeSnapshot(bw, snap);
+    ByteReader br(bw.buf.data() + 1, bw.buf.size() - 1);
+    Snapshot back;
+    CHECK(readSnapshot(br, back));
+    CHECK(back.vehicles.size() == 1 && back.vehicles[0].id == 7 && back.vehicles[0].hp == 200 && back.vehicles[0].flags == VF_BOOST);
+    CHECK(back.self.vehicle == 7 && back.self.seat == 0 && std::fabs(back.self.veh.pos.x - a.pos.x) < 1e-4f);
+    CHECK(back.players.size() == 1 && back.players[0].vehicle == 7 && back.players[0].seat == 1);
+    std::printf("vehicles: ok\n");
+}
+
 int main() {
     testMap();
     testBuilding();
+    testVehicles();
     // Bots should have built something at some point. Checked over both matches: short
     // storm-compressed matches can legitimately see no fights that trigger building.
     size_t built = testMatch(30, 1) + testMatch(24, 2);
