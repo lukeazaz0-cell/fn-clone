@@ -32,6 +32,9 @@ static void usage() {
 }
 
 int main(int argc, char** argv) {
+#ifndef _WIN32
+    std::setvbuf(stdout, nullptr, _IOLBF, 0); // live logs under Docker and service managers
+#endif
     RunnerOptions o;
     o.game.mapSeed = 1337;
     const char* envSecret = std::getenv("STORM_SERVER_SECRET");

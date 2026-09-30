@@ -117,7 +117,7 @@ jobs:
           echo "$STATUS" | jq -e '.status == "assigned"'
           sleep 2
           docker logs storm 2>&1 | tee container.log
-          grep -q "game server registered" container.log
+          grep -q "registered with backend" container.log && grep -q "game server registered" container.log
           docker stop storm
 
       - name: Image metadata
