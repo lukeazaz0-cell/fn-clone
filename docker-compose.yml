@@ -1,0 +1,22 @@
+# Storm Island backend + game servers.
+#
+#   1. Copy .env.example to .env and fill it in (at least STORM_PUBLIC_HOST and STORM_ADMIN_PASSWORD)
+#   2. docker compose up -d
+#   3. Open http://<host>:8080/admin and sign in as "admin"
+services:
+  backend:
+    image: ${STORM_IMAGE:-ghcr.io/lukeazaz0-cell/fn-clone-backend:latest}
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      STORM_DB: /data/stormisland.db
+    ports:
+      - "${STORM_HTTP_PORT:-8080}:${STORM_HTTP_PORT:-8080}/tcp"
+      # One UDP port per concurrent match. Must match STORM_PORTS in .env.
+      - "${STORM_PORTS:-7777-7786}:${STORM_PORTS:-7777-7786}/udp"
+    volumes:
+      - stormisland-data:/data
+
+volumes:
+  stormisland-data:

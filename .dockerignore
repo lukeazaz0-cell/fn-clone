@@ -1,0 +1,13 @@
+# Only the backend, server, shared code, tests and vendored libraries are needed in the image.
+.git
+.github
+build
+build-*
+dist
+client
+docs
+*.db
+*.db-*
+*.md
+!backend/**/*.md
+.env

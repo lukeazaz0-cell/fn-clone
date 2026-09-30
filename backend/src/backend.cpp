@@ -1000,6 +1000,11 @@ void Backend::run() {
     mmThread_ = std::thread([this] { matchmakerLoop(); });
     std::printf("[backend] listening on http://%s:%d  (admin panel: /admin)\n", cfg_.bindHost.c_str(), cfg_.httpPort);
     std::printf("[backend] game server binary: %s%s\n", cfg_.serverBinary.c_str(), fileExists(cfg_.serverBinary) ? "" : "  (NOT FOUND)");
+    std::printf("[backend] spawned servers: %s, UDP ports %d-%d, advertised as %s\n", cfg_.spawnServers ? "on" : "off", cfg_.portMin,
+                cfg_.portMax, cfg_.publicHost.c_str());
+    if (cfg_.spawnServers && (cfg_.publicHost == "127.0.0.1" || cfg_.publicHost == "localhost"))
+        std::printf("[backend] WARNING: public host is %s - players on other machines can't join matches. "
+                    "Set STORM_PUBLIC_HOST (or --public-host) to this server's public IP or hostname.\n", cfg_.publicHost.c_str());
     std::fflush(stdout);
     if (!http_->listen(cfg_.bindHost, cfg_.httpPort)) std::fprintf(stderr, "[backend] failed to listen on port %d\n", cfg_.httpPort);
     running_ = false;

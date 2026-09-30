@@ -9,3 +9,4 @@ autotest_*.png
 .vscode/
 .idea/
 *.swp
+.env

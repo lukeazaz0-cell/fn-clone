@@ -98,7 +98,15 @@ cd build/bin
 - The backend starts `stormisland-server` processes on demand, using UDP ports 7777–7876. Each spawned server exits after its match.
 - For players on other machines, start the backend with `--public-host <your LAN or public IP>` and open the UDP port range in your firewall.
 
-Useful backend options: `--port`, `--db`, `--ports 7777-7876`, `--no-spawn` to only accept externally started servers, and `--secret` for the shared server secret. Without `--secret`, the backend generates one and stores it in the DB. The maximum number of auto-started servers is set in the admin panel.
+Every option can also be set with an environment variable, for example `STORM_PUBLIC_HOST` or `STORM_ADMIN_PASSWORD` (`./stormisland-backend --help` lists them). Useful backend options: `--port`, `--db`, `--ports 7777-7876`, `--no-spawn` to only accept externally started servers, and `--secret` for the shared server secret. Without `--secret`, the backend generates one and stores it in the DB. The maximum number of auto-started servers is set in the admin panel.
+
+### Hosting the backend with Docker
+The backend and game servers are packaged as one Docker image. On any server with Docker:
+```sh
+cp .env.example .env        # set STORM_PUBLIC_HOST (your server's IP) and STORM_ADMIN_PASSWORD
+docker compose up -d --build
+```
+Open TCP 8080 and UDP 7777–7786 in the firewall. CI publishes the image to `ghcr.io/lukeazaz0-cell/fn-clone-backend`. See [docs/HOSTING.md](docs/HOSTING.md) for configuration, HTTPS, backups and troubleshooting.
 
 ### Dedicated servers on other machines
 ```sh
