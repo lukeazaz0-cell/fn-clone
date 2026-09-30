@@ -2,6 +2,7 @@
 // server simulation and the driver's client-side prediction.
 #pragma once
 #include <cstdint>
+#include <vector>
 
 #include "../common/math.h"
 #include "defs.h"
@@ -67,6 +68,11 @@ struct VehicleState {
     bool boosting = false;
     bool inWater = false;
     uint16_t prevButtons = 0;
+    // Tricks (airborne rotation is tracked for scoring and drawn as body pitch)
+    float flip = 0;             // accumulated flip rotation this jump (radians, + = backflip)
+    float airSpin = 0;          // accumulated |yaw| rotation this jump
+    float comboTimer = 0;       // time left to chain the next trick
+    uint8_t combo = 0;
 };
 
 struct VehicleEvents {
@@ -74,10 +80,23 @@ struct VehicleEvents {
     bool jumped = false;
     bool landed = false;
     bool boostStarted = false;
+    bool launched = false;      // launch pad / vent
+    // Trick scoring on landing
+    bool trick = false;
+    bool bailed = false;
+    int trickScore = 0;
+    int halfSpins = 0;          // 180 degree increments
+    int flips = 0;              // + backflips, - frontflips
+    float trickAir = 0;
+    int combo = 0;
 };
 
+// Name of a landed trick, e.g. "BACKFLIP + 360" or "BIG AIR".
+const char* trickName(int halfSpins, int flips, float airTime, char* buf, int bufSize);
+
 // Advances the vehicle one fixed step. `in` is the driver's input (ignored when !hasDriver).
-VehicleEvents stepVehicle(VehicleState& s, VehicleType t, const MoveInput& in, bool hasDriver, const CollisionWorld& world, float dt);
+VehicleEvents stepVehicle(VehicleState& s, VehicleType t, const MoveInput& in, bool hasDriver, const CollisionWorld& world, float dt,
+                          const std::vector<Vec3>* launchPads = nullptr);
 
 // World-space feet position of a seat (ignores tilt so occupants stay upright).
 Vec3 vehicleSeatPos(const VehicleState& s, VehicleType t, int seat);

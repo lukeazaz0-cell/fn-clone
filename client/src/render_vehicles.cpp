@@ -238,7 +238,8 @@ void rollerBallCage(const VehicleVisual& v, float time) {
 } // namespace
 
 Basis vehicleBasis(const VehicleVisual& v) {
-    Basis yb = yawPitchBasis(v.yaw, v.pitch);
+    // Yaw then pitch about the body's right axis (works past 90 degrees for flips), then roll.
+    Basis yb = compose(yawBasis(v.yaw), pitchLocal(v.pitch));
     float cr = std::cos(v.roll), sr = std::sin(v.roll);
     return compose(yb, Basis{{cr, sr, 0}, {-sr, cr, 0}, {0, 0, 1}});
 }

@@ -216,10 +216,64 @@ static void testVehicles() {
     std::printf("vehicles: ok\n");
 }
 
+// Drives a boosting quad along a raised platform, up a ramp and off the end while spinning:
+// it must take off, stay airborne for a while and land a scored trick.
+static void testVehicleAir() {
+    GameMap m;
+    m.generate(42);
+    CollisionWorld w;
+    w.setMap(&m);
+    const float x0 = 300, z0 = 300, top = 90;
+    Shape deck;
+    deck.kind = ShapeKind::Box;
+    deck.box = AABB({x0, top - 1, z0 - 4}, {x0 + 60, top, z0 + 4});
+    w.addDynamicShape(deck);
+    Shape ramp;
+    ramp.kind = ShapeKind::Ramp;
+    ramp.rampDir = RAMP_PX;
+    ramp.box = AABB({x0 + 60, top, z0 - 4}, {x0 + 70, top + 3.5f, z0 + 4});
+    w.addDynamicShape(ramp);
+    VehicleState st;
+    st.pos = {x0 + 3, top, z0};
+    st.yaw = kPi / 2; // facing +X
+    MoveInput mi;
+    mi.fwd = 1;
+    mi.buttons = IN_SPRINT;
+    bool tookOff = false, trick = false;
+    float maxY = st.pos.y, air = 0;
+    int halves = 0;
+    for (int i = 0; i < 60 * 12 && !trick; i++) {
+        if (!st.onGround && st.pos.x > x0 + 69) { tookOff = true; mi.right = 1; mi.buttons = 0; }
+        VehicleEvents ev = stepVehicle(st, VehicleType::CrashQuad, mi, true, w, SIM_DT);
+        maxY = std::max(maxY, st.pos.y);
+        if (ev.trick) { trick = true; air = ev.trickAir; halves = ev.halfSpins; }
+    }
+    std::printf("vehicle air: took off %d, peak +%.1f m over the lip, %.1f s air, %d x 180, trick %d\n", tookOff, maxY - (top + 3.5f), air, halves * 1, trick);
+    CHECK(tookOff);
+    CHECK(maxY > top + 3.5f + 6.0f);   // launched well above the ramp lip
+    CHECK(trick);
+    CHECK(air > 1.0f);
+    CHECK(halves >= 2);         // spun at least 360 while airborne
+
+    // Driving off a flat ledge must not glue the vehicle to the drop
+    VehicleState ledge;
+    ledge.pos = {x0 + 40, top, z0};
+    ledge.yaw = -kPi / 2; // facing -X, toward the deck's start edge
+    MoveInput go;
+    go.fwd = 1;
+    bool airborne = false;
+    for (int i = 0; i < 60 * 4; i++) {
+        stepVehicle(ledge, VehicleType::GolfCart, go, true, w, SIM_DT);
+        if (!ledge.onGround && ledge.pos.x < x0) { airborne = true; break; }
+    }
+    CHECK(airborne);
+}
+
 int main() {
     testMap();
     testBuilding();
     testVehicles();
+    testVehicleAir();
     // Bots should have built something at some point. Checked over both matches: short
     // storm-compressed matches can legitimately see no fights that trigger building.
     size_t built = testMatch(30, 1) + testMatch(24, 2);

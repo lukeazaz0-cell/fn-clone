@@ -778,6 +778,7 @@ void GameClient::hudVehicle() {
     std::string sp = std::to_string((int)std::round(kmh));
     ui::textRight(sp, r.x + r.width - 52 * s, r.y + 8 * s, 30, WHITE);
     ui::text("km/h", r.x + r.width - 46 * s, r.y + 20 * s, 13, ui::MUTED);
+    if (trickTotal_ > 0) ui::textRight("TRICKS " + std::to_string(trickTotal_), r.x + r.width - 18 * s, r.y + r.height - 24 * s, 12, ui::PLAY);
     // Hull + boost meters
     float bx = r.x + 18 * s, by = r.y + 52 * s, bh = 10 * s;
     bool boost = self_.seat == 0 && d.boostSpeed > 0 && driving_;
@@ -808,6 +809,64 @@ void GameClient::hudVehicle() {
     }
 }
 
+// Live air readout while driving, combo timer, and landed-trick popups.
+void GameClient::hudTricks() {
+    float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
+    float s = ui::scale();
+    if (driving_ && !predVeh_.onGround && predVeh_.airTime > 0.3f) {
+        float air = predVeh_.airTime;
+        int halves = (int)((predVeh_.airSpin + 0.45f) / kPi);
+        int flips = (int)std::round(predVeh_.flip / (2 * kPi));
+        float rem = predVeh_.flip - std::round(predVeh_.flip / (2 * kPi)) * 2 * kPi;
+        char nb[64];
+        std::string name = trickName(halves, flips, air, nb, sizeof(nb));
+        char ab[32];
+        std::snprintf(ab, sizeof(ab), "%.1fs", air);
+        float y = H * 0.6f;
+        float tw = std::max(ui::textWidth(name, 26), 200 * s) + 60 * s;
+        Rectangle r{W / 2 - tw / 2, y, tw, 74 * s};
+        ui::rrect(r, 14, Color{8, 12, 22, 170});
+        ui::textCentered(name, W / 2, r.y + 8 * s, 26, ui::PLAY);
+        ui::textCentered(std::string("AIR ") + ab, W / 2, r.y + 44 * s, 15, WHITE);
+        bool danger = std::fabs(rem) > 0.95f && predVeh_.vel.y < 0;
+        float hy = r.y + r.height + 8 * s;
+        if (danger) {
+            ui::textCentered("LEVEL OUT!", W / 2, hy, 20, ui::BAD);
+        } else {
+            float kx = W / 2 - 150 * s;
+            kx += ui::keycap("A", kx, hy, 22 * s) + 4 * s;
+            kx += ui::keycap("D", kx, hy, 22 * s) + 6 * s;
+            ui::text("spin", kx, hy + 3 * s, 13, ui::withAlpha(WHITE, 0.8f));
+            kx += 44 * s;
+            kx += ui::keycap("Ctrl", kx, hy, 22 * s) + 4 * s;
+            ui::text("+", kx, hy + 2 * s, 14, WHITE);
+            kx += 14 * s;
+            kx += ui::keycap("W", kx, hy, 22 * s) + 4 * s;
+            kx += ui::keycap("S", kx, hy, 22 * s) + 6 * s;
+            ui::text("flip", kx, hy + 3 * s, 13, ui::withAlpha(WHITE, 0.8f));
+        }
+    } else if (driving_ && predVeh_.comboTimer > 0 && predVeh_.combo > 0) {
+        float y = H * 0.66f;
+        std::string c = "COMBO x" + std::to_string(predVeh_.combo + 1) + " - land another trick!";
+        ui::textCentered(c, W / 2, y, 16, ui::PLAY);
+        ui::meter({W / 2 - 110 * s, y + 24 * s, 220 * s, 6 * s}, predVeh_.comboTimer / 3.0f, ui::PLAY, Color{0, 0, 0, 140});
+    }
+    // Popups (newest at the bottom of the stack)
+    float py = H * 0.3f;
+    for (auto& t : tricks_) {
+        float a = clampf(1.0f - (t.t - 1.8f) / 0.8f, 0, 1);
+        float pop = 1.0f + 0.5f * std::max(0.0f, 0.18f - t.t) / 0.18f;
+        Color col = t.bailed ? ui::BAD : ui::PLAY;
+        float sz = 34 * pop;
+        ui::textShadow(t.name, W / 2 - ui::textWidth(t.name, sz) / 2, py - t.t * 12 * s, sz, ui::withAlpha(col, a));
+        if (!t.bailed) {
+            std::string sc = "+" + std::to_string(t.score) + (t.combo > 1 ? "   COMBO x" + std::to_string(t.combo) : "");
+            ui::textShadow(sc, W / 2 - ui::textWidth(sc, 22) / 2, py + 44 * s * pop - t.t * 12 * s, 22, ui::withAlpha(WHITE, a));
+        }
+        py += 86 * s;
+    }
+}
+
 void GameClient::renderHud() {
     ui::beginFrame();
     float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
@@ -833,6 +892,7 @@ void GameClient::renderHud() {
     hudLocationBanner(GetFrameTime());
     if (localControllable() || (haveSelf_ && self_.mode == MoveMode::OnBus)) hudBottom();
     if (localControllable()) hudVehicle();
+    if (localControllable()) hudTricks();
     hudTopRight();
     if (settings_.showFps) ui::text(std::to_string(GetFPS()) + " FPS", 10 * s, 8 * s, 13, ui::withAlpha(WHITE, 0.6f));
 

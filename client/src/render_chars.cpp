@@ -304,9 +304,10 @@ static bool drawSoldierCharacter(const CharPose& p, const Loadout& l, float time
     if (p.seatPose == SEAT_SIT) {
         // The chunky model sits lower and a bit smaller so it fits the seats
         scale = 2.25f;
-        feet = feet + si::Vec3{0, 0.12f, 0} - yawBasis(p.yaw).f * 0.12f;
+        Basis ob = p.tilted ? p.tilt : yawBasis(p.yaw);
+        feet = feet + ob.u * 0.12f - ob.f * 0.12f;
     }
-    lib->drawSoldier(feet, p.yaw, anim, p.animTime, scale, shadowOverride());
+    lib->drawSoldier(feet, p.yaw, anim, p.animTime, scale, shadowOverride(), p.tilted ? &p.tilt : nullptr);
     // Held item: only in the holding poses, where the right hand is extended in front.
     bool holding = anim == SoldierAnim::Hold || anim == SoldierAnim::HoldShoot || (p.flags & PF_HARVESTING);
     if (holding && !p.building) {
@@ -339,7 +340,7 @@ void drawCharacter(const CharPose& p, const Loadout& l, float time) {
     else if (dbno) bodyPitch = -1.35f;
     else if (swim) bodyPitch = -0.9f;
     else if (crouch) bodyPitch = -0.25f;
-    Basis body = compose(yawBasis(p.yaw), yawPitchBasis(0, bodyPitch));
+    Basis body = compose(p.tilted ? p.tilt : yawBasis(p.yaw), yawPitchBasis(0, bodyPitch));
     si::Vec3 root = p.pos;
     if (sky) root = root + si::Vec3{0, 1.0f, 0};
     if (dbno) root = root + si::Vec3{0, 0.35f, 0};

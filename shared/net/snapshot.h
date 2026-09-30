@@ -110,6 +110,7 @@ inline ItemStack readStack(ByteReader& r) {
 inline void writeVehicleState(ByteWriter& w, const VehicleState& v) {
     w.vec3(v.pos); w.vec3(v.vel); w.f32(v.yaw); w.f32(v.pitch); w.f32(v.roll); w.f32(v.boost); w.f32(v.airTime);
     w.u8((v.onGround ? 1 : 0) | (v.boosting ? 2 : 0) | (v.inWater ? 4 : 0)); w.u16(v.prevButtons);
+    w.f32(v.flip); w.f32(v.airSpin); w.f32(v.comboTimer); w.u8(v.combo);
 }
 inline VehicleState readVehicleState(ByteReader& r) {
     VehicleState v;
@@ -117,6 +118,7 @@ inline VehicleState readVehicleState(ByteReader& r) {
     uint8_t f = r.u8();
     v.onGround = f & 1; v.boosting = f & 2; v.inWater = f & 4;
     v.prevButtons = r.u16();
+    v.flip = r.f32(); v.airSpin = r.f32(); v.comboTimer = r.f32(); v.combo = r.u8();
     return v;
 }
 

@@ -29,6 +29,7 @@ const char* kPropFiles[(int)PropModel::Count] = {
     "models/platformer/flag.glb",
     "models/arena/tree.glb",
     "models/city/grass-trees-tall.glb",
+    "models/racing/decoration-tents.glb",
 };
 
 const char* kHeldFiles[(int)HeldModel::Count] = {
@@ -156,7 +157,7 @@ void ModelLibrary::drawHeld(HeldModel hm, const si::Vec3& pos, const Basis& b, f
     drawWith(held_[(int)hm].model, basisMatrix(b, pos, scale), override);
 }
 
-void ModelLibrary::drawSoldier(const si::Vec3& feet, float yaw, SoldierAnim anim, float time, float scale, Shader* override) {
+void ModelLibrary::drawSoldier(const si::Vec3& feet, float yaw, SoldierAnim anim, float time, float scale, Shader* override, const Basis* orient) {
     if (!soldierOk_) return;
     int clip = clip_[(int)anim];
     if (clip < 0) clip = clip_[(int)SoldierAnim::Idle];
@@ -165,7 +166,7 @@ void ModelLibrary::drawSoldier(const si::Vec3& feet, float yaw, SoldierAnim anim
     int frame = (int)(time * 24.0f);
     frame = anim == SoldierAnim::Die ? std::min(frame, a.frameCount - 1) : frame % std::max(1, a.frameCount);
     UpdateModelAnimation(soldier_, a, frame);
-    drawWith(soldier_, basisMatrix(yawBasis(yaw), feet, scale), override);
+    drawWith(soldier_, basisMatrix(orient ? *orient : yawBasis(yaw), feet, scale), override);
 }
 
 } // namespace client

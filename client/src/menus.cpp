@@ -806,7 +806,7 @@ void App::drawSettingsTab(Rectangle a) {
             {{"Ctrl"}, "Crouch"}, {{"LMB"}, "Fire / place / horn"}, {{"RMB"}, "Aim down sights / change material"},
             {{"1-5", "F"}, "Inventory slots, pickaxe"}, {{"E"}, "Interact, enter or exit vehicles"}, {{"R"}, "Reload / rotate piece"},
             {{"Q"}, "Build mode"}, {{"Z", "X", "C", "V"}, "Wall, floor, ramp, roof"}, {{"G"}, "Edit the targeted piece"},
-            {{"C"}, "Switch seat (in a vehicle)"}, {{"Tab", "M"}, "Inventory, map"}, {{"B"}, "Emote wheel (1-6)"}, {{"Esc"}, "Menu"}};
+            {{"C"}, "Switch seat (in a vehicle)"}, {{"Ctrl", "W", "S"}, "Flip in the air (A/D spins)"}, {{"Tab", "M"}, "Inventory, map"}, {{"B"}, "Emote wheel (1-6)"}, {{"Esc"}, "Menu"}};
         float yy = c.y + 62 * s;
         float kh = 28 * s;
         for (auto& r : rows) {

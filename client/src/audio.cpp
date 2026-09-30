@@ -121,6 +121,11 @@ bool AudioSystem::init() {
         s.noiseBurst(0, 0.35f, 0.5f, 7, 0.4f);
         s.tone(0, 0.6f, 140, 420, 0.35f, 3.0f);
     });
+    build(Sfx::Trick, [](Synth& s) {
+        s.resize(0.55f);
+        float notes[] = {660, 880, 1100, 1320};
+        for (int i = 0; i < 4; i++) s.tone(i * 0.07f, 0.25f, notes[i], notes[i] * 1.02f, 0.28f, 8, i % 2 == 1);
+    });
     build(Sfx::Crash, [](Synth& s) {
         s.resize(0.5f);
         s.noiseBurst(0, 0.5f, 1.6f, 9, 0.25f);

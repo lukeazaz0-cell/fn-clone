@@ -4,7 +4,7 @@
 
 namespace si {
 
-constexpr int PROTOCOL_VERSION = 5;
+constexpr int PROTOCOL_VERSION = 6;
 constexpr float SIM_DT = 1.0f / 60.0f;      // fixed movement step (client prediction + server)
 constexpr float SERVER_TICK_DT = 1.0f / 30.0f;
 constexpr int MAX_PLAYERS = 100;

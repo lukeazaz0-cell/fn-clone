@@ -26,7 +26,10 @@ Most art is procedural low-poly geometry and every location and most cosmetics a
   - **Trolley**, a shopping cart for a pusher and a passenger. It gets very fast downhill.
   - **Roller Ball**, a bouncy armoured ball. It shields its rider and can jump and boost.
 
-  All vehicles have hull health and can be destroyed. They launch off ramps and hills. Driving uses the same client prediction as walking.
+  All vehicles have hull health and can be destroyed. They leave the ground over crests and ramps, launch pads and vents throw them into the air, and driving uses the same client prediction as walking.
+- **Air tricks**: spin with A/D and flip with Ctrl + W/S while airborne. Landing cleanly scores air time, spins and flips, and chaining landings within 3 seconds multiplies the score (up to x9). Landing upside down is a bail: it damages the vehicle and costs your speed.
+- **Stunt spots**: three stunt parks (Airtime Park, Kickflip Yard and Big Air Field). Each has gap jumps, a table-top, kickers, quarter pipes, loot and its own vehicles. About 30 more jumps are scattered through open country.
+- **Between locations**: campsites, ruins, hilltop radio towers with a shed and a chest at the top, container yards, roadside rest stops, billboards, wrecked cars, hay fields, fallen logs, desert arches and rock pillars, and denser grass and flowers.
 - Storm with 8 shrinking phases, storm damage and a supply drop on some phases.
 - Chests, ammo boxes, floor loot and supply drops. 5 rarities, 10 guns (AR, burst, scoped, pump, tactical, SMG, pistol, bolt sniper, rocket launcher, minigun), grenades, impulse grenades, bandages, medkits, small and large shields, regen soda, mega flask and launch pads.
 - Hit-scan weapons with bloom, first-shot accuracy, headshots, damage falloff, pellets, burst fire and ADS zoom. Rockets and grenades are simulated projectiles.
@@ -136,6 +139,7 @@ Without `--backend` the server runs standalone and accepts anyone. Players join 
 | Tab / M / B | Inventory / map / emote wheel (1–6) |
 | Esc | Menu |
 | In a vehicle | W/S throttle and brake, A/D steer (boards and balls follow the camera), Shift boost, Space jump, C switch seat, LMB horn (driver) |
+| In the air | A/D spin, Ctrl + W/S frontflip or backflip |
 
 ## Project layout
 ```

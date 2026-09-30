@@ -8,7 +8,7 @@
 namespace client {
 
 enum class Sfx { Rifle, Shotgun, Smg, Sniper, Pistol, Rocket, Explosion, Pickaxe, Build, Hit, HeadHit, Pickup, Chest, Hurt, Storm, Bus, Click, Eliminated, Victory,
-                 Jump, Land, Footstep, WeaponSwitch, StructureBreak, Impact, Blaster, BlasterRepeater, Horn, Boost, Crash, Count };
+                 Jump, Land, Footstep, WeaponSwitch, StructureBreak, Impact, Blaster, BlasterRepeater, Horn, Boost, Crash, Trick, Count };
 
 // Looping ambience channels
 enum class Loop { Engine = 0, Ambience, Vehicle, Hover, Roll, Count };

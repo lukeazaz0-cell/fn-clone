@@ -298,7 +298,7 @@ MoveEvents GameClient::stepPrediction(const InputCmd& in) {
     mi.right = in.right;
     mi.buttons = in.buttons;
     if (driving_) {
-        VehicleEvents ve = stepVehicle(predVeh_, drivingType_, mi, true, world_, SIM_DT);
+        VehicleEvents ve = stepVehicle(predVeh_, drivingType_, mi, true, world_, SIM_DT, &launchPads_);
         pred_.pos = vehicleSeatPos(predVeh_, drivingType_, 0);
         pred_.vel = predVeh_.vel;
         MoveEvents me;
@@ -501,6 +501,27 @@ void GameClient::handleEvent(const std::vector<uint8_t>& ev) {
             result_ = MatchResult();
             break;
         }
+        case EV_TRICK: {
+            TrickPopup tp;
+            tp.score = r.u16();
+            int halves = r.u8();
+            int flips = r.i8();
+            float air = r.u16() / 1000.0f;
+            tp.combo = r.u8();
+            tp.bailed = r.u8() != 0;
+            char nb[64];
+            tp.name = tp.bailed ? "BAILED!" : trickName(halves, flips, air, nb, sizeof(nb));
+            if (settings_.autotest) TraceLog(LOG_INFO, "AUTOTEST trick %s +%d combo %d", tp.name.c_str(), tp.score, tp.combo);
+            tp.t = 0;
+            if (!tp.bailed) {
+                trickTotal_ += tp.score;
+                trickBest_ = std::max(trickBest_, tp.score);
+                audio_.play(Sfx::Trick, 0.6f, 1.0f + std::min(4, tp.combo - 1) * 0.08f);
+            }
+            tricks_.push_back(tp);
+            if (tricks_.size() > 4) tricks_.erase(tricks_.begin());
+            break;
+        }
         case EV_TAKE_DAMAGE: {
             si::Vec3 from = r.vec3();
             r.u16();
@@ -573,16 +594,64 @@ void GameClient::autopilotVehicles(InputCmd& in) {
         VehicleVisual vv;
         bool have = vehicleVisual(self_.vehicle, vv);
         in.fwd = 1;
-        float ph = std::fmod(apDrive_, 5.0f);
-        in.right = (ph > 3.0f && ph < 3.8f) ? 1 : 0;
-        if (apDrive_ > 1.5f && apDrive_ < 4.0f) in.buttons |= IN_SPRINT;
         if (have) {
-            float trail = vv.type == VehicleType::Hoverboard || vv.type == VehicleType::RollerBall ? 0.35f : 0.9f;
-            camYaw_ = angleLerp(camYaw_, vv.yaw + trail, 0.04f);
-            camPitch_ = lerpf(camPitch_, -0.2f, 0.05f);
-            if (vv.type == VehicleType::RollerBall && std::fmod(apDrive_, 3.0f) < 0.05f) in.buttons |= IN_JUMP;
+            // Seek the nearest stunt ramp: drive to a run-up point, then line up and hit it on boost.
+            if (apRamp_ < 0 || apDrive_ < SIM_DT * 1.5f) {
+                float best = 120;
+                apRamp_ = -1;
+                apPhase_ = 0;
+                for (size_t i = 0; i < map_.shapes.size(); i++) {
+                    const Shape& sh = map_.shapes[i];
+                    if (sh.kind != ShapeKind::Ramp || sh.maxHp != 600 || sh.box.max.y - sh.box.min.y < 2.0f) continue;
+                    const Shape* ws = world_.shape(sh.id);
+                    if (!ws || !ws->alive) continue;
+                    float d = distXZ(sh.box.center(), vv.pos);
+                    if (d < best) { best = d; apRamp_ = (int)i; }
+                }
+            }
+            bool air = driving_ && !predVeh_.onGround;
+            // Unstick: if we barely move for a while, reverse away and pick the run-up again
+            apVehStuck_ = vv.speed < 1.5f && !air ? apVehStuck_ + SIM_DT : 0;
+            if (apVehStuck_ > 1.2f) { apReverse_ = 1.4f; apVehStuck_ = 0; apPhase_ = 0; apRevYaw_ = wrapAngle(vv.yaw + kPi); }
+            if (apReverse_ > 0) {
+                apReverse_ -= SIM_DT;
+                in.fwd = -1;
+                in.right = 1;
+                if (vehicleDef(vv.type).cameraSteer) camYaw_ = apRevYaw_;
+                in.fwd = vehicleDef(vv.type).cameraSteer ? 1 : -1;
+            } else if (apRamp_ >= 0 && !air) {
+                const Shape& sh = map_.shapes[apRamp_];
+                si::Vec3 dir = sh.rampDir == RAMP_PX ? si::Vec3{1, 0, 0} : sh.rampDir == RAMP_NX ? si::Vec3{-1, 0, 0} : sh.rampDir == RAMP_PZ ? si::Vec3{0, 0, 1} : si::Vec3{0, 0, -1};
+                si::Vec3 c = sh.box.center();
+                float halfLen = std::fabs(dir.x) > 0 ? (sh.box.max.x - sh.box.min.x) / 2 : (sh.box.max.z - sh.box.min.z) / 2;
+                si::Vec3 low = c - dir * halfLen;
+                si::Vec3 target = apPhase_ == 0 ? low - dir * 22.0f : c + dir * 30.0f;
+                if (apPhase_ == 0 && distXZ(vv.pos, target) < 5.0f) apPhase_ = 1;
+                if (apPhase_ == 1 && (vv.pos - c).dot(dir) > halfLen + 20) { apPhase_ = 0; apRamp_ = -1; }
+                float want = yawFromDir(target - vv.pos);
+                float diff = wrapAngle(want - vv.yaw);
+                const VehicleDef& d = vehicleDef(vv.type);
+                if (d.cameraSteer) {
+                    camYaw_ = angleLerp(camYaw_, want, 0.15f);
+                } else {
+                    in.right = diff > 0.06f ? -1 : diff < -0.06f ? 1 : 0;
+                    if (std::fabs(diff) > 1.8f) in.fwd = -1; // back up and swing round
+                }
+                if (apPhase_ == 1 && std::fabs(diff) < 0.35f && d.boostSpeed > 0) in.buttons |= IN_SPRINT;
+                if (apPhase_ == 0 && distXZ(vv.pos, target) < 14.0f) in.fwd = std::fabs(diff) < 0.5f ? 1 : 0;
+            }
+            if (air) {
+                in.right = 1; // spin for points
+                if (predVeh_.airTime > 0.15f && predVeh_.airTime < 1.35f && vv.type == VehicleType::CrashQuad) {
+                    in.buttons |= IN_CROUCH;
+                    in.fwd = -1; // backflip
+                }
+            }
+            float trail = vv.type == VehicleType::Hoverboard || vv.type == VehicleType::RollerBall ? 0.0f : 0.5f;
+            if (!vehicleDef(vv.type).cameraSteer) camYaw_ = angleLerp(camYaw_, vv.yaw + trail, 0.05f);
+            camPitch_ = lerpf(camPitch_, -0.18f, 0.05f);
         }
-        if (apDrive_ > 10.0f) {
+        if (apDrive_ > 22.0f) {
             apDoneTypes_ |= 1u << self_.vehicleType;
             in.buttons |= IN_INTERACT;
             apDrive_ = 0;
@@ -758,6 +827,8 @@ void GameClient::updateEffects(float dt) {
     for (auto& m : messages_) m.t -= dt;
     messages_.erase(std::remove_if(messages_.begin(), messages_.end(), [](const Message& m) { return m.t <= 0; }), messages_.end());
     for (auto& d : dmgIndicators_) d.t -= dt;
+    for (auto& t : tricks_) t.t += dt;
+    tricks_.erase(std::remove_if(tricks_.begin(), tricks_.end(), [](const TrickPopup& t) { return t.t > 2.6f; }), tricks_.end());
     dmgIndicators_.erase(std::remove_if(dmgIndicators_.begin(), dmgIndicators_.end(), [](const DamageIndicator& d) { return d.t <= 0; }), dmgIndicators_.end());
     hitMarker_ = std::max(0.0f, hitMarker_ - dt);
     damageFlash_ = std::max(0.0f, damageFlash_ - dt);
@@ -1309,17 +1380,20 @@ void GameClient::renderPlayers() {
             if (vehicleVisual(vehId, vv)) {
                 const VehicleDef& d = vehicleDef(vv.type);
                 if (seat >= d.seats) seat = 0;
-                VehicleState st;
-                st.pos = vv.pos;
-                st.yaw = vv.yaw;
-                pose.pos = vehicleSeatPos(st, vv.type, seat);
+                // Seat position through the vehicle's full orientation so riders follow flips and slopes
+                Basis vb = vehicleBasis(vv);
+                const si::Vec3& o = d.seatPos[seat];
+                pose.pos = vv.pos + vb.r * o.x + vb.u * o.y + vb.f * o.z;
                 if (vv.type == VehicleType::Hoverboard) pose.pos.y += 0.06f * std::sin(time_ * 3.0f + vv.id);
                 pose.seatPose = d.seatPose[seat];
                 pose.steering = seat == 0;
                 pose.mode = MoveMode::Ground;
                 pose.speed = 0;
                 bool aimingSeat = d.seatShoot[seat] && pose.flags & (PF_FIRING | PF_ADS);
-                if (!aimingSeat) pose.yaw = vv.yaw;
+                if (!aimingSeat) {
+                    pose.yaw = vv.yaw;
+                    if (vv.type != VehicleType::RollerBall) { pose.tilted = true; pose.tilt = vb; }
+                }
                 if (aimingSeat) pose.steering = false;
                 if (!d.seatShoot[seat]) pose.steering = seat == 0;
             }

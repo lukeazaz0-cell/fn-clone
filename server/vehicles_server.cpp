@@ -134,7 +134,7 @@ void Game::driveVehicle(Player& p, const InputCmd& in, float dt) {
         mi.fwd = in.fwd;
         mi.right = in.right;
         mi.buttons = in.buttons;
-        VehicleEvents ev = stepVehicle(v->st, v->type, mi, true, world, dt);
+        VehicleEvents ev = stepVehicle(v->st, v->type, mi, true, world, dt, &launchPads);
         afterVehicleStep(*v, ev, dt);
         // Drivers who can't shoot honk instead
         v->honkCooldown -= dt;
@@ -151,6 +151,27 @@ void Game::afterVehicleStep(Vehicle& v, const VehicleEvents& ev, float dt) {
     v.crashCooldown -= dt;
     uint16_t driver = v.seats[0];
     if (ev.boostStarted) effects.push_back({FX_BOOST, driver, v.st.pos, {}, (uint8_t)v.type});
+    if (ev.trick || ev.bailed) {
+        ByteWriter w;
+        w.u8(EV_TRICK);
+        w.u16((uint16_t)std::min(65535, ev.trickScore));
+        w.u8((uint8_t)ev.halfSpins);
+        w.i8((int8_t)ev.flips);
+        w.u16((uint16_t)std::min(65535.0f, ev.trickAir * 1000.0f));
+        w.u8((uint8_t)ev.combo);
+        w.u8(ev.bailed ? 1 : 0);
+        for (auto sid : v.seats) {
+            if (sid == 0xFFFF) continue;
+            auto it = players.find(sid);
+            if (it != players.end() && !it->second.bot) emit(w, sid);
+        }
+        auto dit = players.find(driver);
+        if (ev.trick && ev.trickScore >= 1500 && dit != players.end()) {
+            char nb[64];
+            broadcastMessage(dit->second.name + " landed " + trickName(ev.halfSpins, ev.flips, ev.trickAir, nb, sizeof(nb)) + "  +" + std::to_string(ev.trickScore), 3);
+        }
+        if (ev.bailed) effects.push_back({FX_CRASH, driver, v.st.pos + Vec3{0, 0.8f, 0}, {}, 200});
+    }
     if (ev.impact > 9.0f && v.crashCooldown <= 0) {
         effects.push_back({FX_CRASH, driver, v.st.pos + Vec3{0, 0.8f, 0}, {}, (uint8_t)std::min(255.0f, ev.impact * 4)});
         if (v.type != VehicleType::RollerBall) damageVehicle(v, (ev.impact - 8.0f) * 6.0f, 0xFFFF);
@@ -222,7 +243,7 @@ void Game::updateVehicles(float dt) {
         if (!v.hasDriver()) {
             MoveInput none;
             for (int i = 0; i < steps; i++) {
-                VehicleEvents ev = stepVehicle(v.st, v.type, none, false, world, SIM_DT);
+                VehicleEvents ev = stepVehicle(v.st, v.type, none, false, world, SIM_DT, &launchPads);
                 afterVehicleStep(v, ev, SIM_DT);
                 if (!v.alive) break;
             }

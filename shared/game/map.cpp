@@ -1230,6 +1230,7 @@ void GameMap::buildPoi(POI& p) {
             else { house(cx, cz, 9, 8, 2, Material::Wood, hc(), rc(), true, 1); }
             break;
         }
+        case PoiType::StuntPark: break; // built by genDetails
     }
 }
 
@@ -1406,6 +1407,502 @@ void GameMap::genSlipstreams() {
     mk({{0.27f, 0.24f}, {0.33f, 0.31f}, {0.42f, 0.38f}, {0.48f, 0.44f}}, 12);
 }
 
+// ------------------------------------------------------------------ extra detail
+
+void GameMap::stuntRamp(float x, float z, int dir, float len, float width, float h, float baseY, Color4 c, bool backPlate) {
+    AABB b;
+    uint8_t rd = RAMP_PX;
+    switch (dir) {
+        case 0: b = AABB({x, baseY, z - width / 2}, {x + len, baseY + h, z + width / 2}); rd = RAMP_PX; break;
+        case 1: b = AABB({x - len, baseY, z - width / 2}, {x, baseY + h, z + width / 2}); rd = RAMP_NX; break;
+        case 2: b = AABB({x - width / 2, baseY, z}, {x + width / 2, baseY + h, z + len}); rd = RAMP_PZ; break;
+        default: b = AABB({x - width / 2, baseY, z - len}, {x + width / 2, baseY + h, z}); rd = RAMP_NZ; break;
+    }
+    ramp(b.min, b.max, rd, Material::Wood, c, 600);
+    if (!backPlate) return;
+    const float t = 0.3f;
+    Color4 back = shade(c, 0.7f);
+    float bottom = baseY - 1.0f;
+    switch (dir) {
+        case 0: box({b.max.x - t, bottom, b.min.z}, {b.max.x, b.max.y, b.max.z}, Material::Wood, back, 600, true, 0); break;
+        case 1: box({b.min.x, bottom, b.min.z}, {b.min.x + t, b.max.y, b.max.z}, Material::Wood, back, 600, true, 0); break;
+        case 2: box({b.min.x, bottom, b.max.z - t}, {b.max.x, b.max.y, b.max.z}, Material::Wood, back, 600, true, 0); break;
+        default: box({b.min.x, bottom, b.min.z}, {b.max.x, b.max.y, b.min.z + t}, Material::Wood, back, 600, true, 0); break;
+    }
+}
+
+// A concrete pad full of jumps: kickers, a table-top, a gap jump, quarter pipes, floodlights,
+// banners and a loot chest on the table.
+void GameMap::stuntPark(float cx, float cz, const std::string& name) {
+    const float half = 26;
+    float top = footprintMax(cx - half, cz - half, cx + half, cz + half) + 0.15f;
+    float bottom = footprintMin(cx - half, cz - half, cx + half, cz + half) - 1.0f;
+    box({cx - half, bottom, cz - half}, {cx + half, top, cz + half}, Material::Brick, rgb(150, 152, 158), 0, false);
+    // Access ramps where the pad stands proud of the terrain
+    {
+        struct Side { float x, z; int dir; } sides[] = {{cx - half, cz + 14, 0}, {cx + half, cz - 14, 1}, {cx + 10, cz + half, 3}, {cx - 2, cz - half, 2}};
+        for (auto& sd : sides) {
+            float lx = sd.dir == 0 ? sd.x - 8 : sd.dir == 1 ? sd.x + 8 : sd.x;
+            float lz = sd.dir == 2 ? sd.z - 8 : sd.dir == 3 ? sd.z + 8 : sd.z;
+            float g = heightAt(lx, lz);
+            if (top - g < 0.3f) continue;
+            stuntRamp(lx, lz, sd.dir, 8, 9, top - g + 0.02f, g - 0.05f, rgb(140, 142, 148), false);
+        }
+    }
+    // Painted lanes
+    for (int i = -2; i <= 2; i++)
+        addBoxDecor(DecorKind::Trim, AABB({cx - half + 1, top, cz + i * 10.0f - 0.12f}, {cx + half - 1, top + 0.02f, cz + i * 10.0f + 0.12f}),
+                    rgb(235, 200, 60), INVALID_ID);
+    Color4 ply = rgb(196, 156, 104), steel = rgb(120, 140, 170), red = rgb(210, 70, 60);
+    // Gap jump along X (south side)
+    stuntRamp(cx - 22, cz - 14, 0, 7, 6, 2.6f, top, ply, true);
+    stuntRamp(cx + 12, cz - 14, 1, 9, 6, 2.6f, top, ply, false); // landing ramp: high edge faces the kicker
+    box({cx + 3, top - 0.2f, cz - 17}, {cx + 3.3f, top + 2.6f, cz - 11}, Material::Wood, shade(ply, 0.7f), 600, true, 0);
+    // Table-top along Z (east side)
+    stuntRamp(cx + 16, cz - 6, 2, 8, 7, 3.2f, top, steel, false);
+    box({cx + 12.5f, top, cz + 2}, {cx + 19.5f, top + 3.2f, cz + 9}, Material::Metal, shade(steel, 0.85f), 800, true, 0);
+    stuntRamp(cx + 16, cz + 17, 3, 8, 7, 3.2f, top, steel, false);
+    addChest({cx + 16, top + 3.2f, cz + 5.5f}, 0);
+    // Kickers in the middle
+    stuntRamp(cx - 6, cz + 2, 0, 6, 5, 2.0f, top, red, true);
+    stuntRamp(cx + 2, cz + 12, 1, 6, 5, 2.4f, top, ply, true);
+    // Quarter pipes on the north and west edges
+    stuntRamp(cx - 8, cz + 20, 2, 5, 12, 5.0f, top, steel, true);
+    stuntRamp(cx - 20, cz - 2, 1, 5, 12, 5.0f, top, steel, true);
+    // Floodlights, banners, loot, barrels
+    for (int k = 0; k < 4; k++) {
+        float sx = k % 2 ? 1.0f : -1.0f, sz = k < 2 ? 1.0f : -1.0f;
+        addProp(DecorKind::StreetLamp, cx + sx * (half - 1.5f), cz + sz * (half - 1.5f), kPi / 4 + k * kPi / 2, rgb(70, 72, 80));
+        decor.back().pos.y = top;
+    }
+    for (int k = 0; k < 3; k++) {
+        Decor d;
+        d.kind = DecorKind::Model;
+        d.model = k == 1 ? PropModel::Flag : PropModel::Banner;
+        d.pos = {cx - 12.0f + k * 12.0f, top, cz - half + 1.0f};
+        d.yaw = 0;
+        d.scale = 2.5f;
+        d.color = rgb(200, 200, 200);
+        decor.push_back(d);
+    }
+    addLoot({cx - 14, top + 0.05f, cz + 8});
+    addLoot({cx + 4, top + 0.05f, cz - 4});
+    addLoot({cx - 2, top + 0.05f, cz - 22});
+    POI p;
+    p.name = name;
+    p.type = PoiType::StuntPark;
+    p.center = {cx, cz};
+    p.radius = half + 6;
+    p.major = false;
+    p.baseHeight = top;
+    pois.push_back(p);
+}
+
+// Fills the space between locations: stunt parks and jumps, campsites, ruins, radio towers,
+// hay fields, container yards, parked wrecks, billboards, fallen logs, rock arches and
+// denser ground cover. Own random stream so the rest of the map is unchanged.
+void GameMap::genDetails() {
+    Rng dr(seed ^ 0xDE7A11, 17);
+    // Occupancy (2 m cells) from everything placed so far
+    const int ON = (int)(W / 2);
+    std::vector<uint8_t> occ((size_t)ON * ON, 0);
+    auto mark = [&](float x0, float z0, float x1, float z1) {
+        int ix0 = std::max(0, (int)(x0 / 2) - 1), ix1 = std::min(ON - 1, (int)(x1 / 2) + 1);
+        int iz0 = std::max(0, (int)(z0 / 2) - 1), iz1 = std::min(ON - 1, (int)(z1 / 2) + 1);
+        for (int z = iz0; z <= iz1; z++)
+            for (int x = ix0; x <= ix1; x++) occ[(size_t)z * ON + x] = 1;
+    };
+    // Trees (style 7) and boulders (style 6) don't block placement: they get cleared instead.
+    auto isVegetation = [](const Shape& sh) { return sh.style == 7 || sh.style == 6; };
+    for (auto& s : shapes)
+        if (s.alive && !isVegetation(s)) mark(s.box.min.x, s.box.min.z, s.box.max.x, s.box.max.z);
+    size_t shapesBefore = shapes.size();
+    auto clearVeg = [&](float x0, float z0, float x1, float z1) {
+        AABB area({x0 - 1, -1000, z0 - 1}, {x1 + 1, 1000, z1 + 1});
+        for (size_t i = 0; i < shapesBefore; i++)
+            if (shapes[i].alive && isVegetation(shapes[i]) && shapes[i].box.overlaps(area)) { shapes[i].alive = false; shapes[i].solid = false; }
+        decor.erase(std::remove_if(decor.begin(), decor.end(), [&](const Decor& d) {
+                        bool ground = d.kind == DecorKind::GrassTuft || d.kind == DecorKind::Bush || d.kind == DecorKind::Flower || d.kind == DecorKind::Crop;
+                        return ground && d.linkedShape == INVALID_ID && d.pos.x > x0 - 1 && d.pos.x < x1 + 1 && d.pos.z > z0 - 1 && d.pos.z < z1 + 1;
+                    }),
+                    decor.end());
+    };
+    auto claim = [&](float x0, float z0, float x1, float z1) { mark(x0, z0, x1, z1); clearVeg(x0, z0, x1, z1); };
+    auto onRoad = [&](float x, float z) {
+        int cx = std::min(HM_N - 1, std::max(0, (int)(x / CELL))), cz = std::min(HM_N - 1, std::max(0, (int)(z / CELL)));
+        return roadMask[(size_t)cz * HM_N + cx] != 0;
+    };
+    auto areaFree = [&](float x0, float z0, float x1, float z1, bool allowRoad) {
+        if (x0 < 30 || z0 < 30 || x1 > W - 30 || z1 > W - 30) return false;
+        for (float z = z0; z <= z1; z += 2)
+            for (float x = x0; x <= x1; x += 2) {
+                int ix = (int)(x / 2), iz = (int)(z / 2);
+                if (occ[(size_t)iz * ON + ix]) return false;
+                if (heightAt(x, z) < WATER_LEVEL + 0.8f) return false;
+                if (!allowRoad && onRoad(x, z)) return false;
+            }
+        return true;
+    };
+    auto flatness = [&](float x0, float z0, float x1, float z1) {
+        float lo = 1e9f, hi = -1e9f;
+        for (float z = z0; z <= z1; z += 3)
+            for (float x = x0; x <= x1; x += 3) { float h = heightAt(x, z); lo = std::min(lo, h); hi = std::max(hi, h); }
+        return hi - lo;
+    };
+    auto inPoi = [&](float x, float z, float margin) {
+        for (auto& p : pois)
+            if (dist2d(p.center, {x, z}) < p.radius + margin) return true;
+        return false;
+    };
+    // Random spot in the wild with a free, reasonably flat footprint
+    auto findSpot = [&](float halfX, float halfZ, float maxSlope, float poiMargin, Vec2& out, int tries = 60) {
+        for (int i = 0; i < tries; i++) {
+            float x = dr.range(60, W - 60), z = dr.range(60, W - 60);
+            if (inPoi(x, z, poiMargin)) continue;
+            if (!areaFree(x - halfX, z - halfZ, x + halfX, z + halfZ, false)) continue;
+            if (flatness(x - halfX, z - halfZ, x + halfX, z + halfZ) > maxSlope) continue;
+            out = {x, z};
+            return true;
+        }
+        return false;
+    };
+
+    // --- Stunt parks
+    const char* parkNames[] = {"Airtime Park", "Kickflip Yard", "Big Air Field"};
+    std::vector<Vec2> parks;
+    for (int n = 0; n < 3; n++) {
+        for (int attempt = 0; attempt < 400; attempt++) {
+            Vec2 c;
+            if (!findSpot(28, 28, 2.0f, 45, c, 1)) continue;
+            bool far = true;
+            for (auto& o : parks) if (dist2d(o, c) < 350) far = false;
+            if (!far) continue;
+            stuntPark(c.x, c.y, parkNames[n]);
+            parks.push_back(c);
+            claim(c.x - 28, c.y - 28, c.x + 28, c.y + 28);
+            break;
+        }
+    }
+
+    // --- Stand-alone jumps: kickers, table-tops and gap jumps in open fields
+    Color4 jumpCols[] = {rgb(196, 156, 104), rgb(210, 90, 60), rgb(90, 140, 200), rgb(230, 190, 70)};
+    for (int n = 0; n < 34; n++) {
+        int kind = n % 3; // 0 kicker, 1 table-top, 2 gap jump
+        int dir = dr.irange(0, 3);
+        bool alongX = dir < 2;
+        float lenTotal = kind == 0 ? 10 : kind == 1 ? 26 : 32;
+        float halfL = lenTotal / 2 + 4, halfW = 6;
+        Vec2 c;
+        if (!findSpot(alongX ? halfL : halfW, alongX ? halfW : halfL, 1.6f, 25, c, 20)) continue;
+        float base = footprintMin(c.x - (alongX ? halfL : halfW), c.y - (alongX ? halfW : halfL), c.x + (alongX ? halfL : halfW), c.y + (alongX ? halfW : halfL)) - 0.05f;
+        Color4 col = jumpCols[n % 4];
+        float sgn = (dir == 0 || dir == 2) ? 1.0f : -1.0f;
+        auto at = [&](float along) { return alongX ? Vec2{c.x + sgn * along, c.y} : Vec2{c.x, c.y + sgn * along}; };
+        int back = dir ^ 1; // opposite direction
+        if (kind == 0) {
+            Vec2 p = at(-lenTotal / 2);
+            stuntRamp(p.x, p.y, dir, dr.range(6, 9), dr.range(4.5f, 6), dr.range(2.2f, 3.6f), base, col, true);
+        } else if (kind == 1) {
+            float h = dr.range(2.6f, 3.6f);
+            Vec2 a = at(-13), b = at(13);
+            stuntRamp(a.x, a.y, dir, 8, 6, h, base, col, false);
+            Vec2 t0 = at(-5), t1 = at(5);
+            box({std::min(t0.x, t1.x) - (alongX ? 0 : 3), base, std::min(t0.y, t1.y) - (alongX ? 3 : 0)},
+                {std::max(t0.x, t1.x) + (alongX ? 0 : 3), base + h, std::max(t0.y, t1.y) + (alongX ? 3 : 0)}, Material::Wood, shade(col, 0.85f), 800, true, 0);
+            stuntRamp(b.x, b.y, back, 8, 6, h, base, col, false);
+            if (dr.chance(0.5f)) addLoot({c.x, base + h + 0.05f, c.y});
+        } else {
+            float h = dr.range(2.4f, 3.2f), gap = dr.range(10, 16);
+            Vec2 a = at(-lenTotal / 2);
+            stuntRamp(a.x, a.y, dir, 7, 6, h, base, col, true);
+            Vec2 l = at(-lenTotal / 2 + 7 + gap);
+            // landing ramp: high edge at the start, sloping down away from the kicker
+            Vec2 le = at(-lenTotal / 2 + 7 + gap + 9);
+            stuntRamp(le.x, le.y, back, 9, 6, h, base, col, false);
+            (void)l;
+        }
+        claim(c.x - (alongX ? halfL : halfW), c.y - (alongX ? halfW : halfL), c.x + (alongX ? halfL : halfW), c.y + (alongX ? halfW : halfL));
+    }
+
+    // --- Campsites: tents, a fire ring with log benches, supplies and loot
+    for (int n = 0; n < 14; n++) {
+        Vec2 c;
+        if (!findSpot(7, 7, 1.5f, 30, c, 40)) continue;
+        float h = heightAt(c.x, c.y);
+        float yaw = dr.range(0, 2 * kPi);
+        Vec2 tent{c.x + std::cos(yaw) * 4.0f, c.y + std::sin(yaw) * 4.0f};
+        modelProp(PropModel::Tents, tent.x, tent.y, yaw + kPi / 2, 2.2f, {1.8f, 1.1f, 1.8f}, 120, true);
+        for (int k = 0; k < 7; k++) {
+            float a = k * 2 * kPi / 7;
+            float sx = c.x + std::cos(a) * 0.9f, sz = c.y + std::sin(a) * 0.9f;
+            box({sx - 0.18f, h - 0.1f, sz - 0.18f}, {sx + 0.18f, h + 0.25f, sz + 0.18f}, Material::Brick, rgb(120, 118, 115), 80, true, 6);
+        }
+        addProp(DecorKind::Lamp, c.x, c.y, 0, rgb(255, 170, 60));
+        for (int s = -1; s <= 1; s += 2) {
+            float lx = c.x + std::cos(yaw + kPi / 2) * 2.4f * s, lz = c.y + std::sin(yaw + kPi / 2) * 2.4f * s;
+            box({lx - 1.1f, h - 0.1f, lz - 0.3f}, {lx + 1.1f, h + 0.45f, lz + 0.3f}, Material::Wood, rgb(110, 76, 48), 120, true, 7);
+        }
+        crate(c.x - std::cos(yaw) * 3.5f, c.y - std::sin(yaw) * 3.5f, 0.9f);
+        addLoot({c.x - std::cos(yaw) * 2.5f + 1.2f, h + 0.05f, c.y - std::sin(yaw) * 2.5f});
+        if (dr.chance(0.6f)) addChest({tent.x + std::cos(yaw) * 2.6f, h, tent.y + std::sin(yaw) * 2.6f}, yaw);
+        claim(c.x - 7, c.y - 7, c.x + 7, c.y + 7);
+    }
+
+    // --- Ruins: broken stone walls around a courtyard with a chest
+    for (int n = 0; n < 12; n++) {
+        Vec2 c;
+        if (!findSpot(8, 7, 2.5f, 30, c, 40)) continue;
+        float base = footprintMin(c.x - 7, c.y - 6, c.x + 7, c.y + 6) - 0.3f;
+        Color4 stone = jitter(dr, biomeAt(c.x, c.y) == Biome::Desert ? rgb(200, 170, 130) : rgb(150, 146, 138), 0.06f);
+        const float hx = 7, hz = 6;
+        for (int side = 0; side < 4; side++) {
+            bool alongX = side < 2;
+            float fixed = side == 0 ? c.y - hz : side == 1 ? c.y + hz : side == 2 ? c.x - hx : c.x + hx;
+            float from = alongX ? c.x - hx : c.y - hz, to = alongX ? c.x + hx : c.y + hz;
+            int segs = 4;
+            for (int k = 0; k < segs; k++) {
+                if (dr.chance(0.3f)) continue; // collapsed section
+                float s0 = from + (to - from) * k / segs, s1 = from + (to - from) * (k + 1) / segs;
+                float hh = dr.range(0.8f, 3.6f);
+                if (alongX) box({s0, base, fixed - 0.4f}, {s1, base + hh, fixed + 0.4f}, Material::Brick, shade(stone, dr.range(0.9f, 1.05f)), 300, true, 0);
+                else box({fixed - 0.4f, base, s0}, {fixed + 0.4f, base + hh, s1}, Material::Brick, shade(stone, dr.range(0.9f, 1.05f)), 300, true, 0);
+            }
+        }
+        // Pillars and rubble
+        for (int k = 0; k < 4; k++) {
+            float px = c.x + (k % 2 ? 3.5f : -3.5f), pz = c.y + (k < 2 ? 2.5f : -2.5f);
+            if (dr.chance(0.35f)) continue;
+            box({px - 0.45f, base, pz - 0.45f}, {px + 0.45f, base + dr.range(1.5f, 4.5f), pz + 0.45f}, Material::Brick, shade(stone, 1.05f), 250, true, 0);
+        }
+        for (int k = 0; k < 6; k++) {
+            float rx = c.x + dr.range(-9, 9), rz = c.y + dr.range(-8, 8);
+            float sz = dr.range(0.3f, 0.7f);
+            float ry = heightAt(rx, rz);
+            box({rx - sz, ry - 0.2f, rz - sz}, {rx + sz, ry + sz, rz + sz * 0.8f}, Material::Brick, shade(stone, 0.9f), 80, true, 6);
+        }
+        addChest({c.x, heightAt(c.x, c.y), c.y}, dr.range(0, 2 * kPi));
+        addLoot({c.x + 2, heightAt(c.x + 2, c.y + 1) + 0.05f, c.y + 1});
+        claim(c.x - 9, c.y - 8, c.x + 9, c.y + 8);
+    }
+
+    // --- Radio towers on hilltops, each with a small shed
+    {
+        struct Cand { float h; Vec2 p; };
+        std::vector<Cand> cands;
+        for (float z = 80; z < W - 80; z += 36)
+            for (float x = 80; x < W - 80; x += 36) {
+                float h = heightAt(x, z);
+                if (h > 12 && !inPoi(x, z, 30)) cands.push_back({h, {x, z}});
+            }
+        std::sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) { return a.h > b.h; });
+        std::vector<Vec2> towers;
+        for (auto& cd : cands) {
+            if (towers.size() >= 6) break;
+            bool far = true;
+            for (auto& t : towers) if (dist2d(t, cd.p) < 260) far = false;
+            if (!far || !areaFree(cd.p.x - 6, cd.p.y - 6, cd.p.x + 6, cd.p.y + 6, false)) continue;
+            towers.push_back(cd.p);
+            float base = footprintMin(cd.p.x - 2, cd.p.y - 2, cd.p.x + 2, cd.p.y + 2) - 0.3f;
+            const float th = 26, hw = 1.4f;
+            Color4 steel = rgb(170, 60, 50), white = rgb(225, 225, 230);
+            for (int k = 0; k < 4; k++) {
+                float lx = cd.p.x + (k % 2 ? hw : -hw), lz = cd.p.y + (k < 2 ? hw : -hw);
+                box({lx - 0.15f, base, lz - 0.15f}, {lx + 0.15f, base + th, lz + 0.15f}, Material::Metal, steel, 500, true, 0);
+            }
+            for (float y = 3; y < th; y += 4) {
+                Color4 bc = ((int)y / 4) % 2 ? white : steel;
+                box({cd.p.x - hw, base + y, cd.p.y - hw - 0.08f}, {cd.p.x + hw, base + y + 0.18f, cd.p.y - hw + 0.08f}, Material::Metal, bc, 300, true, 0);
+                box({cd.p.x - hw, base + y, cd.p.y + hw - 0.08f}, {cd.p.x + hw, base + y + 0.18f, cd.p.y + hw + 0.08f}, Material::Metal, bc, 300, true, 0);
+                box({cd.p.x - hw - 0.08f, base + y, cd.p.y - hw}, {cd.p.x - hw + 0.08f, base + y + 0.18f, cd.p.y + hw}, Material::Metal, bc, 300, true, 0);
+                box({cd.p.x + hw - 0.08f, base + y, cd.p.y - hw}, {cd.p.x + hw + 0.08f, base + y + 0.18f, cd.p.y + hw}, Material::Metal, bc, 300, true, 0);
+            }
+            box({cd.p.x - 2.2f, base + th, cd.p.y - 2.2f}, {cd.p.x + 2.2f, base + th + 0.3f, cd.p.y + 2.2f}, Material::Metal, rgb(90, 90, 96), 400, true, 0);
+            box({cd.p.x - 0.1f, base + th + 0.3f, cd.p.y - 0.1f}, {cd.p.x + 0.1f, base + th + 5, cd.p.y + 0.1f}, Material::Metal, white, 200, true, 0);
+            addProp(DecorKind::Lamp, cd.p.x, cd.p.y, 0, rgb(255, 60, 50));
+            decor.back().pos.y = base + th + 5;
+            addChest({cd.p.x, base + th + 0.3f, cd.p.y + 1.2f}, 0);
+            // Shed with a doorway
+            float sx = cd.p.x + 6, sz = cd.p.y;
+            float sb = footprintMin(sx - 2.5f, sz - 2, sx + 2.5f, sz + 2) - 0.2f;
+            Color4 shed = rgb(150, 160, 150);
+            box({sx - 2.5f, sb, sz - 2}, {sx + 2.5f, sb + 2.8f, sz - 1.8f}, Material::Metal, shed, 300, true, 3);
+            box({sx - 2.5f, sb, sz + 1.8f}, {sx + 2.5f, sb + 2.8f, sz + 2}, Material::Metal, shed, 300, true, 3);
+            box({sx + 2.3f, sb, sz - 2}, {sx + 2.5f, sb + 2.8f, sz + 2}, Material::Metal, shed, 300, true, 3);
+            box({sx - 2.5f, sb, sz - 2}, {sx - 2.3f, sb + 2.8f, sz - 0.7f}, Material::Metal, shed, 300, true, 3);
+            box({sx - 2.5f, sb, sz + 0.7f}, {sx - 2.3f, sb + 2.8f, sz + 2}, Material::Metal, shed, 300, true, 3);
+            box({sx - 2.7f, sb + 2.8f, sz - 2.2f}, {sx + 2.7f, sb + 3.0f, sz + 2.2f}, Material::Metal, rgb(100, 105, 110), 300, true, 3);
+            addLoot({sx, sb + 0.25f, sz});
+            claim(cd.p.x - 3, cd.p.y - 3, sx + 3, sz + 3);
+        }
+    }
+
+    // --- Hay fields on farmland, container yards, parked wrecks and billboards along roads
+    for (int n = 0; n < 60; n++) {
+        float x = dr.range(60, W - 60), z = dr.range(60, W - 60);
+        if (biomeAt(x, z) != Biome::Farm || inPoi(x, z, 10)) continue;
+        int bales = dr.irange(3, 8);
+        for (int k = 0; k < bales; k++) {
+            float bx = x + dr.range(-10, 10), bz = z + dr.range(-10, 10);
+            if (!areaFree(bx - 1, bz - 1, bx + 1, bz + 1, false)) continue;
+            float h = heightAt(bx, bz);
+            bool alongX = dr.chance(0.5f);
+            float hx = alongX ? 1.1f : 0.65f, hz = alongX ? 0.65f : 1.1f;
+            box({bx - hx, h - 0.1f, bz - hz}, {bx + hx, h + 1.1f, bz + hz}, Material::Wood, jitter(dr, rgb(222, 190, 100), 0.06f), 90, true, 0);
+            if (dr.chance(0.25f)) box({bx - hx, h + 1.1f, bz - hz}, {bx + hx, h + 2.2f, bz + hz}, Material::Wood, jitter(dr, rgb(222, 190, 100), 0.06f), 90, true, 0);
+            claim(bx - hx, bz - hz, bx + hx, bz + hz);
+        }
+    }
+    Color4 boardCols[] = {rgb(230, 80, 60), rgb(60, 150, 230), rgb(250, 200, 60), rgb(120, 200, 110), rgb(200, 100, 220)};
+    for (size_t ri = 0; ri < roads.size(); ri++) {
+        const Road& rd = roads[ri];
+        Vec2 d = rd.b - rd.a;
+        float len = d.len();
+        if (len < 80) continue;
+        Vec2 dir = d * (1.0f / len), side{-dir.y, dir.x};
+        bool alongX = std::fabs(dir.x) > std::fabs(dir.y);
+        for (float t = 40; t < len - 40; t += dr.range(90, 150)) {
+            float off = rd.width * 0.5f + dr.range(4, 7);
+            float sgn = dr.chance(0.5f) ? 1.0f : -1.0f;
+            Vec2 p = rd.a + dir * t + side * (off * sgn);
+            if (inPoi(p.x, p.y, 0) || !areaFree(p.x - 4, p.y - 4, p.x + 4, p.y + 4, false)) continue;
+            float roll = dr.uniform();
+            if (roll < 0.35f) {
+                // Billboard facing the road
+                float base = heightAt(p.x, p.y) - 0.3f;
+                Color4 bc = boardCols[dr.irange(0, 4)];
+                if (alongX) {
+                    for (int s = -1; s <= 1; s += 2) box({p.x + s * 3.0f - 0.15f, base, p.y - 0.15f}, {p.x + s * 3.0f + 0.15f, base + 7.5f, p.y + 0.15f}, Material::Metal, rgb(80, 80, 88), 300, true, 0);
+                    box({p.x - 4.2f, base + 4.2f, p.y - 0.2f}, {p.x + 4.2f, base + 7.8f, p.y + 0.2f}, Material::Metal, bc, 300, true, 0);
+                    addBoxDecor(DecorKind::Trim, AABB({p.x - 3.6f, base + 5.4f, p.y - 0.25f}, {p.x + 1.0f, base + 6.6f, p.y + 0.25f}), rgb(250, 250, 250), INVALID_ID);
+                } else {
+                    for (int s = -1; s <= 1; s += 2) box({p.x - 0.15f, base, p.y + s * 3.0f - 0.15f}, {p.x + 0.15f, base + 7.5f, p.y + s * 3.0f + 0.15f}, Material::Metal, rgb(80, 80, 88), 300, true, 0);
+                    box({p.x - 0.2f, base + 4.2f, p.y - 4.2f}, {p.x + 0.2f, base + 7.8f, p.y + 4.2f}, Material::Metal, bc, 300, true, 0);
+                    addBoxDecor(DecorKind::Trim, AABB({p.x - 0.25f, base + 5.4f, p.y - 3.6f}, {p.x + 0.25f, base + 6.6f, p.y + 1.0f}), rgb(250, 250, 250), INVALID_ID);
+                }
+            } else if (roll < 0.65f) {
+                car(p.x, p.y, alongX, jitter(dr, boardCols[dr.irange(0, 4)], 0.1f));
+                if (dr.chance(0.4f)) addLoot({p.x + side.x * 2.5f, heightAt(p.x, p.y) + 0.05f, p.y + side.y * 2.5f});
+            } else if (roll < 0.8f) {
+                // Container yard
+                int count = dr.irange(2, 5);
+                for (int k = 0; k < count; k++) {
+                    float cx = p.x + (alongX ? k * 3.0f : 0), cz = p.y + (alongX ? 0 : k * 3.0f);
+                    if (!areaFree(cx - 3.5f, cz - 3.5f, cx + 3.5f, cz + 3.5f, false)) break;
+                    Color4 cc = jitter(dr, boardCols[dr.irange(0, 4)], 0.1f);
+                    container(cx, cz, !alongX, cc);
+                    if (dr.chance(0.3f)) {
+                        float base = heightAt(cx, cz) + 2.3f;
+                        float lx = !alongX ? 6.0f : 2.4f, lz = !alongX ? 2.4f : 6.0f;
+                        box({cx - lx / 2, base, cz - lz / 2}, {cx + lx / 2, base + 2.6f, cz + lz / 2}, Material::Metal, shade(cc, 0.9f), 400, true, 3);
+                    }
+                    claim(cx - 3.5f, cz - 3.5f, cx + 3.5f, cz + 3.5f);
+                }
+                addChest({p.x, heightAt(p.x, p.y), p.y + (alongX ? 2.2f : 0)}, 0);
+            } else {
+                // Roadside rest stop: picnic table, bench, trash barrels
+                float h = heightAt(p.x, p.y);
+                box({p.x - 1.1f, h + 0.72f, p.y - 0.5f}, {p.x + 1.1f, h + 0.82f, p.y + 0.5f}, Material::Wood, rgb(150, 105, 65), 60, true, 0);
+                box({p.x - 0.1f, h - 0.1f, p.y - 0.1f}, {p.x + 0.1f, h + 0.72f, p.y + 0.1f}, Material::Wood, rgb(110, 76, 48), 60, true, 0);
+                for (int s = -1; s <= 1; s += 2) box({p.x - 1.0f, h + 0.4f, p.y + s * 0.95f - 0.18f}, {p.x + 1.0f, h + 0.48f, p.y + s * 0.95f + 0.18f}, Material::Wood, rgb(150, 105, 65), 40, true, 0);
+                barrel(p.x + 2.4f, p.y + 1.2f, rgb(60, 120, 70));
+                addProp(DecorKind::Bench, p.x - 2.6f, p.y + 1.6f, dr.range(0, kPi), rgb(130, 90, 55));
+                addLoot({p.x + 1.5f, h + 0.05f, p.y - 1.5f});
+            }
+            claim(p.x - 5, p.y - 5, p.x + 5, p.y + 5);
+        }
+    }
+
+    // --- Fallen logs in forests, rock arches and pillars in the desert / volcanic badlands
+    for (int n = 0; n < 700; n++) {
+        float x = dr.range(40, W - 40), z = dr.range(40, W - 40);
+        Biome b = biomeAt(x, z);
+        if (inPoi(x, z, 5)) continue;
+        if ((b == Biome::Forest || b == Biome::Jungle || b == Biome::Snow) && dr.chance(0.35f)) {
+            bool alongX = dr.chance(0.5f);
+            float len = dr.range(4, 8), rr = dr.range(0.3f, 0.5f);
+            float hx = alongX ? len / 2 : rr, hz = alongX ? rr : len / 2;
+            if (!areaFree(x - hx, z - hz, x + hx, z + hz, false) || flatness(x - hx, z - hz, x + hx, z + hz) > 0.8f) continue;
+            float h = footprintMin(x - hx, z - hz, x + hx, z + hz);
+            box({x - hx, h - 0.15f, z - hz}, {x + hx, h + rr * 1.8f, z + hz}, Material::Wood, jitter(dr, rgb(105, 75, 50), 0.08f), 150, true, 7);
+            if (dr.chance(0.5f)) {
+                Decor d;
+                d.kind = DecorKind::Bush;
+                d.pos = {x + (alongX ? len * 0.3f : 0.8f), h, z + (alongX ? 0.8f : len * 0.3f)};
+                d.scale = 0.7f;
+                d.color = rgb(70, 130, 55);
+                decor.push_back(d);
+            }
+            claim(x - hx, z - hz, x + hx, z + hz);
+        } else if ((b == Biome::Desert || b == Biome::Volcanic) && dr.chance(0.12f)) {
+            if (!areaFree(x - 6, z - 3, x + 6, z + 3, false)) continue;
+            Color4 rc = b == Biome::Desert ? rgb(196, 132, 88) : rgb(70, 62, 60);
+            float h = footprintMin(x - 6, z - 3, x + 6, z + 3) - 0.5f;
+            if (dr.chance(0.5f)) {
+                // Natural arch
+                float ah = dr.range(5, 9);
+                box({x - 5.5f, h, z - 1.5f}, {x - 3.0f, h + ah, z + 1.5f}, Material::Brick, jitter(dr, rc, 0.06f), 600, true, 6);
+                box({x + 3.0f, h, z - 1.5f}, {x + 5.5f, h + ah, z + 1.5f}, Material::Brick, jitter(dr, rc, 0.06f), 600, true, 6);
+                box({x - 6.0f, h + ah, z - 1.7f}, {x + 6.0f, h + ah + 2.2f, z + 1.7f}, Material::Brick, jitter(dr, shade(rc, 1.08f), 0.06f), 600, true, 6);
+            } else {
+                // Stacked hoodoo pillar
+                float y = h, sz = dr.range(2.0f, 3.0f);
+                for (int k = 0; k < 4; k++) {
+                    float hh = dr.range(1.5f, 3.0f);
+                    box({x - sz, y, z - sz * 0.8f}, {x + sz, y + hh, z + sz * 0.8f}, Material::Brick, jitter(dr, rc, 0.08f), 400, true, 6);
+                    y += hh;
+                    sz *= dr.range(0.7f, 0.95f);
+                }
+            }
+            claim(x - 6, z - 3, x + 6, z + 3);
+        }
+    }
+
+    // --- Denser ground cover: grass, flowers, bushes and pebbles in the open
+    for (float z = 8; z < W - 8; z += 5.0f) {
+        for (float x = 8; x < W - 8; x += 5.0f) {
+            float px = x + dr.range(-2.2f, 2.2f), pz = z + dr.range(-2.2f, 2.2f);
+            float h = heightAt(px, pz);
+            if (h < WATER_LEVEL + 0.6f || onRoad(px, pz)) continue;
+            int ix = (int)(px / 2), iz = (int)(pz / 2);
+            if (occ[(size_t)iz * ON + ix]) continue;
+            Biome b = biomeAt(px, pz);
+            float r = dr.uniform();
+            Decor d;
+            d.pos = {px, h, pz};
+            d.yaw = dr.range(0, 2 * kPi);
+            d.scale = dr.range(0.6f, 1.3f);
+            switch (b) {
+                case Biome::Grass: case Biome::Forest: case Biome::Farm:
+                    if (r < 0.42f) { d.kind = DecorKind::GrassTuft; d.color = jitter(dr, rgb(100, 160, 68), 0.1f); }
+                    else if (r < 0.50f) { d.kind = DecorKind::Flower; d.color = r < 0.46f ? rgb(245, 210, 70) : r < 0.48f ? rgb(240, 120, 160) : rgb(170, 140, 240); }
+                    else if (r < 0.56f) { d.kind = DecorKind::Bush; d.color = jitter(dr, rgb(72, 138, 60), 0.1f); }
+                    else continue;
+                    break;
+                case Biome::Jungle:
+                    if (r < 0.5f) { d.kind = DecorKind::GrassTuft; d.color = rgb(60, 145, 58); d.scale *= 1.3f; }
+                    else if (r < 0.62f) { d.kind = DecorKind::Bush; d.color = jitter(dr, rgb(50, 125, 50), 0.1f); d.scale *= 1.2f; }
+                    else continue;
+                    break;
+                case Biome::Desert:
+                    if (r < 0.10f) { d.kind = DecorKind::GrassTuft; d.color = rgb(190, 170, 100); }
+                    else if (r < 0.14f) { d.kind = DecorKind::Bush; d.color = rgb(150, 140, 80); d.scale *= 0.7f; }
+                    else continue;
+                    break;
+                case Biome::Beach:
+                    if (r < 0.08f) { d.kind = DecorKind::GrassTuft; d.color = rgb(170, 175, 100); }
+                    else continue;
+                    break;
+                case Biome::Snow:
+                    if (r < 0.05f) { d.kind = DecorKind::Bush; d.color = rgb(225, 235, 240); d.scale *= 0.8f; }
+                    else continue;
+                    break;
+                default: continue;
+            }
+            decor.push_back(d);
+        }
+    }
+}
+
 // Parked vehicles: carts around residential areas, trolleys at shops, boards in the city and
 // industrial zones, quads in the rough terrain, roller balls scattered around, plus a few
 // along the roads. Uses its own random stream so it doesn't shift the rest of the map.
@@ -1469,6 +1966,14 @@ void GameMap::genVehicles() {
                 place(VehicleType::CrashQuad, p.center.x, p.center.y, r0, r1);
                 place(VehicleType::Trolley, p.center.x, p.center.y, r0, r1);
                 break;
+            case PoiType::StuntPark: {
+                // Parked on the concrete pad, clear of the jumps
+                const Vec2 spots[] = {{-14, 12}, {6, 2}, {-12, -4}};
+                const VehicleType types[] = {VehicleType::CrashQuad, VehicleType::Hoverboard, VehicleType::RollerBall};
+                for (int k = 0; k < 3; k++)
+                    vehicleSpawns.push_back({{p.center.x + spots[k].x, p.baseHeight, p.center.y + spots[k].y}, kPi / 2, types[k]});
+                break;
+            }
             case PoiType::Temple:
                 place(VehicleType::RollerBall, p.center.x, p.center.y, r0, r1);
                 place(VehicleType::CrashQuad, p.center.x, p.center.y, r0, r1);
@@ -1514,6 +2019,7 @@ void GameMap::generate(uint32_t s) {
     genNature();
     genStreetProps();
     genSlipstreams();
+    genDetails();
     genVehicles();
     const POI* c = nullptr;
     for (auto& p : pois) if (p.type == PoiType::FutureCity) c = &p;

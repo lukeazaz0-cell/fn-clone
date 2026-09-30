@@ -29,7 +29,8 @@ public:
 
     bool hasSoldier() const { return soldierOk_; }
     // Poses the soldier for one character and draws it. `time` drives the clip.
-    void drawSoldier(const si::Vec3& feet, float yaw, SoldierAnim anim, float time, float scale, Shader* override = nullptr);
+    void drawSoldier(const si::Vec3& feet, float yaw, SoldierAnim anim, float time, float scale, Shader* override = nullptr,
+                     const Basis* orient = nullptr);
 
     std::string assetDir;
 

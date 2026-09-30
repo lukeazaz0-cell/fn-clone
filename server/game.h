@@ -32,6 +32,7 @@ struct GameConfig {
     bool resetAfterMatch = true;       // false = server should exit after reporting
     uint32_t mapSeed = 1337;
     bool fillBotsToMax = false;        // alternative to defaultBots: fill all empty slots
+    std::string debugSpawn;            // testing: warmup spawn at a location name or "x,z"
 };
 
 struct Effect {

@@ -43,6 +43,7 @@ enum EventType : uint8_t {
     EV_SUPPLY_OPEN,
     EV_RESET_WORLD,   // clears structures/items/chests (warmup -> match)
     EV_TAKE_DAMAGE,   // to victim: direction indicator
+    EV_TRICK,         // to vehicle occupants: landed trick / bail
 };
 
 enum KillFlags : uint8_t { KF_HEADSHOT = 1, KF_KNOCKED = 2, KF_STORM = 4, KF_FALL = 8, KF_EXPLOSION = 16, KF_PICKAXE = 32 };

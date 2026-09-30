@@ -1,6 +1,7 @@
 #include "game.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <chrono>
 #include <set>
 
@@ -235,6 +236,26 @@ void Game::queueInput(Player& p, const InputCmd& c) {
 // =============================================================================== world reset / loot
 
 void Game::spawnWarmup(Player& p) {
+    if (!cfg.debugSpawn.empty()) {
+        float dx = -1, dz = -1;
+        for (auto& x : map.pois)
+            if (x.name.find(cfg.debugSpawn) != std::string::npos) { dx = x.center.x + 8; dz = x.center.y + 8; }
+        if (dx < 0 && std::sscanf(cfg.debugSpawn.c_str(), "%f,%f", &dx, &dz) != 2) dx = -1;
+        if (dx >= 0) {
+            exitVehicle(p);
+            p.move = MoveState();
+            p.move.pos = {dx, world.groundHeight({dx, 300, dz}, PLAYER_RADIUS, 400) + 0.05f, dz};
+            p.move.mode = MoveMode::Ground;
+            p.alive = true;
+            p.eliminated = false;
+            p.dbno = false;
+            p.health = MAX_HEALTH;
+            p.shield = 50;
+            p.action = ACT_NONE;
+            giveLoadoutWarmup(p);
+            return;
+        }
+    }
     const POI* poi = nullptr;
     std::vector<const POI*> majors;
     for (auto& x : map.pois) if (x.major) majors.push_back(&x);

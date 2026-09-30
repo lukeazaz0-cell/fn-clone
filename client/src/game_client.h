@@ -70,6 +70,7 @@ struct DamageNumber { si::Vec3 p; int amount; uint8_t flags; float t; };
 struct KillFeedEntry { std::string text; float t; bool mine; };
 struct Message { std::string text; uint8_t kind; float t; };
 struct DamageIndicator { si::Vec3 from; float t; };
+struct TrickPopup { std::string name; int score; int combo; bool bailed; float t; };
 
 struct MatchResult {
     bool has = false;
@@ -147,6 +148,8 @@ private:
     si::Vec3 apLastPos_;
     uint32_t apDoneTypes_ = 0;
     float apTargetTime_ = 0;
+    int apRamp_ = -1, apPhase_ = 0;
+    float apVehStuck_ = 0, apReverse_ = 0, apRevYaw_ = 0;
     std::vector<uint16_t> apSkip_;
     void autopilotVehicles(InputCmd& in);
     float camYaw_ = 0, camPitch_ = 0;
@@ -173,6 +176,9 @@ private:
     std::vector<KillFeedEntry> killfeed_;
     std::vector<Message> messages_;
     std::vector<DamageIndicator> dmgIndicators_;
+    std::vector<TrickPopup> tricks_;
+    int trickTotal_ = 0;
+    int trickBest_ = 0;
     Camera3D cam_{};
     int lastSelected_ = -1;
     uint8_t lastPhase_ = 255;
@@ -226,6 +232,7 @@ private:
     void hudPause();
     void hudResults();
     void hudVehicle();
+    void hudTricks();
     Vector2 worldToMap(const si::Vec3& p, Rectangle r, si::Vec3 center, float meters, bool whole) const;
     std::string playerName(uint16_t id) const;
 };

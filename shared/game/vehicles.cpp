@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <string>
 
 #include "movement.h"
 
@@ -16,7 +18,7 @@ const VehicleDef kDefs[(int)VehicleType::Count] = {
     {"Fairway Cart", "Four seats. Passengers can shoot while the driver steers.",
      4, 1.25f, 1.9f, 1.05f,
      19.0f, 0.0f, 9.0f, 24.0f, 7.0f, 1.8f, 7.0f, 2.5f, 0.7f,
-     800.0f, 0.0f, 0.0f, 0.0f, 0.08f,
+     800.0f, 6.5f, 0.0f, 0.0f, 0.08f,
      false, false, false,
      {{0.36f, 0.22f, 0.15f}, {-0.36f, 0.22f, 0.15f}, {0.36f, 0.32f, -0.95f}, {-0.36f, 0.32f, -0.95f}},
      {false, true, true, true},
@@ -43,7 +45,7 @@ const VehicleDef kDefs[(int)VehicleType::Count] = {
     {"Trolley", "Pusher and a passenger in the basket. Gets very fast downhill.",
      2, 0.8f, 1.25f, 0.95f,
      11.0f, 0.0f, 6.0f, 11.0f, 4.0f, 2.4f, 5.5f, 0.6f, 1.7f,
-     300.0f, 0.0f, 0.0f, 0.0f, 0.15f,
+     300.0f, 6.0f, 0.0f, 0.0f, 0.15f,
      false, false, false,
      {{0.0f, 0.0f, -0.95f}, {0.0f, 0.4f, 0.1f}, {}, {}},
      {false, true, false, false},
@@ -60,6 +62,10 @@ const VehicleDef kDefs[(int)VehicleType::Count] = {
 };
 
 constexpr float kMaxVehicleSpeed = 36.0f;
+constexpr float kAirGravity = GRAVITY * 0.8f;   // floatier than players for bigger jumps
+constexpr float kSpinRate = 4.6f;               // rad/s mid-air spin (A/D)
+constexpr float kFlipRate = 5.2f;               // rad/s mid-air flip (Ctrl + W/S)
+constexpr float kTwoPi = 6.2831853f;
 
 bool isBall(VehicleType t) { return t == VehicleType::RollerBall; }
 
@@ -84,7 +90,8 @@ AABB vehicleHull(const VehicleState& s, VehicleType t) {
     return AABB({s.pos.x - r, s.pos.y, s.pos.z - r}, {s.pos.x + r, s.pos.y + d.hitHeight, s.pos.z + r});
 }
 
-VehicleEvents stepVehicle(VehicleState& s, VehicleType t, const MoveInput& in, bool hasDriver, const CollisionWorld& world, float dt) {
+VehicleEvents stepVehicle(VehicleState& s, VehicleType t, const MoveInput& in, bool hasDriver, const CollisionWorld& world, float dt,
+                          const std::vector<Vec3>* launchPads) {
     VehicleEvents ev;
     const VehicleDef& d = vehicleDef(t);
     uint16_t buttons = hasDriver ? in.buttons : 0;
@@ -168,7 +175,7 @@ VehicleEvents stepVehicle(VehicleState& s, VehicleType t, const MoveInput& in, b
             if (wish.len2() > 0) {
                 float target = std::atan2(wish.x, wish.z);
                 float diff = wrapAngle(target - s.yaw);
-                float rate = d.turnRate * (grounded ? 1.0f : 0.5f);
+                float rate = grounded ? d.turnRate : 0.0f; // mid-air rotation is trick control
                 s.yaw = wrapAngle(s.yaw + clampf(diff, -rate * dt, rate * dt));
                 float c = std::cos(diff);
                 throttle = c > 0.2f ? c : (c < -0.5f ? -1.0f : 0.0f);
@@ -199,8 +206,6 @@ VehicleEvents stepVehicle(VehicleState& s, VehicleType t, const MoveInput& in, b
             float sf = clampf(std::fabs(vf) / 3.5f, 0, 1) * (vf < 0 ? -1.0f : 1.0f);
             float turn = steer * d.turnRate * sf * (s.boosting ? 0.8f : 1.0f);
             s.yaw = wrapAngle(s.yaw - turn * dt);
-        } else {
-            s.yaw = wrapAngle(s.yaw - steer * d.turnRate * 0.35f * dt);
         }
         // Velocity follows the new heading (arcade handling)
         f = yawForward(s.yaw);
@@ -215,8 +220,47 @@ VehicleEvents stepVehicle(VehicleState& s, VehicleType t, const MoveInput& in, b
         if (sp > 4.0f) { float k = std::exp(-2.5f * dt); s.vel.x *= k; s.vel.z *= k; }
     }
     {
-        float sp = s.vel.len();
-        if (sp > kMaxVehicleSpeed) s.vel = s.vel * (kMaxVehicleSpeed / sp);
+        // Cap ground speed only; vertical speed (ramp launches, pads) is limited separately
+        float sp = s.vel.lenXZ();
+        if (sp > kMaxVehicleSpeed) { s.vel.x *= kMaxVehicleSpeed / sp; s.vel.z *= kMaxVehicleSpeed / sp; }
+        s.vel.y = clampf(s.vel.y, -60.0f, 45.0f);
+    }
+
+    // --- mid-air tricks: A/D spin, Ctrl + W/S flip (W = frontflip, S = backflip)
+    if (!s.onGround && !isBall(t)) {
+        if (hasDriver) {
+            float dyaw = -clampf((float)in.right, -1, 1) * kSpinRate * dt;
+            s.yaw = wrapAngle(s.yaw + dyaw);
+            s.airSpin += std::fabs(dyaw);
+        }
+        bool flipping = hasDriver && (buttons & IN_CROUCH) && in.fwd != 0;
+        if (flipping) {
+            s.flip += -clampf((float)in.fwd, -1, 1) * kFlipRate * dt;
+        } else {
+            // Stabiliser: ease toward the nearest upright orientation so landings stay forgiving
+            float target = std::round(s.flip / kTwoPi) * kTwoPi;
+            s.flip += (target - s.flip) * clampf(dt * 3.0f, 0, 1);
+        }
+    }
+    if (!s.onGround && isBall(t) && hasDriver) {
+        float dyaw = -clampf((float)in.right, -1, 1) * kSpinRate * 0.5f * dt;
+        s.airSpin += std::fabs(dyaw);
+    }
+
+    // --- launch pads and volcano vents throw vehicles too
+    {
+        auto launch = [&](float up) {
+            s.vel.y = std::max(s.vel.y, up);
+            if (s.onGround) s.airTime = 0;
+            s.onGround = false;
+            ev.launched = true;
+        };
+        if (launchPads)
+            for (const auto& lp : *launchPads)
+                if (distXZ(lp, s.pos) < 1.8f + d.radius * 0.6f && std::fabs(s.pos.y - lp.y) < 1.2f && s.vel.y < 20.0f) launch(30.0f);
+        if (world.map)
+            for (const auto& v : world.map->vents)
+                if (distXZ(v.pos, s.pos) < v.radius + d.radius * 0.5f && s.pos.y < v.pos.y + 3.0f && s.vel.y < 25.0f) launch(38.0f);
     }
 
     // --- jump
@@ -251,23 +295,28 @@ VehicleEvents stepVehicle(VehicleState& s, VehicleType t, const MoveInput& in, b
         if (d.hover) gy = WATER_LEVEL + 0.02f;
         else { gy = WATER_LEVEL - 0.55f; water = true; }
     }
+    float fallY = s.pos.y + s.vel.y * dt - 0.5f * kAirGravity * dt * dt; // where we'd be if we let go
+    bool wasAir = !s.onGround;
+    float airBefore = s.airTime;
     if (s.onGround) {
-        float predicted = s.pos.y + s.vel.y * dt;
-        if (s.vel.y > 3.5f && gy < predicted - 0.02f) {
-            // Crest of a ramp: carry the vertical speed into the air
-            s.onGround = false;
-            s.pos.y = predicted;
-            s.vel.y -= GRAVITY * dt;
-        } else if (gy >= s.pos.y - 0.45f) {
+        bool curb = gy > s.pos.y + 0.3f;
+        if (gy >= fallY - 0.03f) {
+            // Ground is where gravity would put us (or higher): ride the surface
             float dy = gy - s.pos.y;
-            s.vel.y = std::fabs(dy) < 0.3f ? clampf(dy / dt, -20.0f, 20.0f) : 0.0f;
+            s.vel.y = curb ? 0.0f : clampf(dy / dt, -25.0f, 25.0f);
             s.pos.y = gy;
         } else {
+            // The ground drops away faster than we fall: take off. Ramp lips give a little extra pop.
             s.onGround = false;
-            s.vel.y = std::min(s.vel.y, 0.0f);
+            if (s.vel.y > 2.0f) s.vel.y = s.vel.y * 1.15f + 1.5f;
+            s.pos.y = fallY;
+            s.vel.y -= kAirGravity * dt;
+            s.airTime = 0;
+            s.flip = 0;
+            s.airSpin = 0;
         }
     } else {
-        s.vel.y -= GRAVITY * dt;
+        s.vel.y -= kAirGravity * dt;
         float ny = s.pos.y + s.vel.y * dt;
         if (s.vel.y > 0) {
             float ceil = world.ceilingHeight(s.pos, footR, d.height);
@@ -278,7 +327,7 @@ VehicleEvents stepVehicle(VehicleState& s, VehicleType t, const MoveInput& in, b
             if (d.bounce > 0.4f && s.vel.y < -7.0f) {
                 s.vel.y = -s.vel.y * 0.4f;
             } else {
-                if (s.vel.y < -14.0f) ev.impact = std::max(ev.impact, -s.vel.y - 14.0f);
+                if (s.vel.y < -16.0f) ev.impact = std::max(ev.impact, -s.vel.y - 16.0f);
                 s.vel.y = 0;
                 s.onGround = true;
                 ev.landed = s.airTime > 0.25f;
@@ -286,6 +335,37 @@ VehicleEvents stepVehicle(VehicleState& s, VehicleType t, const MoveInput& in, b
         } else {
             s.pos.y = ny;
         }
+    }
+    // Landing: score the trick (or bail)
+    if (wasAir && s.onGround) {
+        float flipRem = s.flip - std::round(s.flip / kTwoPi) * kTwoPi;
+        int flips = (int)std::round(s.flip / kTwoPi);
+        int halves = (int)((s.airSpin + 0.45f) / 3.14159265f);
+        if (std::fabs(flipRem) > 0.95f) {
+            ev.bailed = true;
+            ev.impact = std::max(ev.impact, 12.0f);
+            s.vel.x *= 0.35f;
+            s.vel.z *= 0.35f;
+            s.combo = 0;
+            s.comboTimer = 0;
+        } else if (airBefore > 0.5f && hasDriver) {
+            int score = (int)(airBefore * 100.0f) + halves * 150 + std::abs(flips) * 450;
+            s.combo = s.comboTimer > 0 ? (uint8_t)std::min(9, s.combo + 1) : (uint8_t)1;
+            score *= s.combo;
+            s.comboTimer = 3.0f;
+            ev.trick = true;
+            ev.trickScore = score;
+            ev.halfSpins = halves;
+            ev.flips = flips;
+            ev.trickAir = airBefore;
+            ev.combo = s.combo;
+        }
+        s.flip = 0;
+        s.airSpin = 0;
+    }
+    if (s.onGround && s.comboTimer > 0) {
+        s.comboTimer = std::max(0.0f, s.comboTimer - dt);
+        if (s.comboTimer <= 0) s.combo = 0;
     }
     s.inWater = water && s.onGround;
     if (s.pos.y < world.terrainHeight(s.pos.x, s.pos.z) - 1.5f && !water) s.pos.y = world.terrainHeight(s.pos.x, s.pos.z);
@@ -301,14 +381,32 @@ VehicleEvents stepVehicle(VehicleState& s, VehicleType t, const MoveInput& in, b
         tp = std::atan2(a - b, 2 * probe);
         tr = std::atan2(c - e, 2 * probe);
     } else if (!s.onGround && !isBall(t)) {
-        tp = clampf(std::atan2(s.vel.y, std::max(1.0f, s.vel.lenXZ())) * 0.6f, -0.6f, 0.6f);
+        tp = clampf(std::atan2(s.vel.y, std::max(1.0f, s.vel.lenXZ())) * 0.5f, -0.5f, 0.5f);
     }
     float k = clampf(dt * 10.0f, 0, 1);
-    s.pitch = lerpf(s.pitch, clampf(tp, -0.7f, 0.7f), k);
+    if (!s.onGround && !isBall(t)) s.pitch = wrapAngle(s.flip + tp); // flips rotate the whole body
+    else s.pitch = lerpf(wrapAngle(s.pitch), clampf(tp, -0.7f, 0.7f), k);
     s.roll = lerpf(s.roll, clampf(tr, -0.6f, 0.6f), k);
     (void)hL;
     (void)hR;
     return ev;
+}
+
+const char* trickName(int halfSpins, int flips, float airTime, char* buf, int bufSize) {
+    std::string out;
+    if (flips != 0) {
+        int n = std::abs(flips);
+        out += n >= 3 ? "TRIPLE " : n == 2 ? "DOUBLE " : "";
+        out += flips > 0 ? "BACKFLIP" : "FRONTFLIP";
+    }
+    if (halfSpins > 0) {
+        if (!out.empty()) out += " + ";
+        out += std::to_string(halfSpins * 180);
+    }
+    if (out.empty()) out = airTime > 3.0f ? "HUGE AIR" : airTime > 1.5f ? "BIG AIR" : "AIR";
+    else if (airTime > 2.0f) out = "BIG AIR " + out;
+    std::snprintf(buf, (size_t)bufSize, "%s", out.c_str());
+    return buf;
 }
 
 } // namespace si

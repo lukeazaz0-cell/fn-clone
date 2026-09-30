@@ -138,6 +138,8 @@ struct CharPose {
     bool building = false;
     uint8_t seatPose = 0;     // SEAT_SIT / SEAT_STAND while riding a vehicle
     bool steering = false;    // hands forward on a wheel / handlebars
+    bool tilted = false;      // follow a vehicle's full orientation (flips, slopes)
+    Basis tilt;               // body orientation including yaw when tilted
 };
 void drawCharacter(const CharPose& p, const Loadout& l, float time);
 void drawGlider(const si::Vec3& pos, float yaw, const Loadout& l);

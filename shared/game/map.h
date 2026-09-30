@@ -18,7 +18,7 @@ enum class Biome : uint8_t { Grass = 0, Forest, Snow, Desert, Jungle, Volcanic, 
 
 enum class PoiType : uint8_t {
     FutureCity, Mall, Industrial, PirateCove, SnowLodge, Airfield, DesertTown, LanternVillage, Farm, Suburb,
-    SmallTown, Lodge, Junkyard, Mansion, Temple, Estates, Mines, Hamlet, LakeHouse, Volcano, Landmark
+    SmallTown, Lodge, Junkyard, Mansion, Temple, Estates, Mines, Hamlet, LakeHouse, Volcano, Landmark, StuntPark
 };
 
 struct POI {
@@ -49,7 +49,7 @@ enum class DecorKind : uint8_t { PineTree = 0, OakTree, PalmTree, JungleTree, Bu
 // Prop models drawn by the client from 3D model files (CC0 Kenney assets). Each has a
 // collision box in the map (style 11) and a procedural fallback when the file is missing.
 enum class PropModel : uint8_t { None = 0, TruckGreen, TruckPurple, TruckRed, TruckYellow, Motorcycle, Statue, Column, Banner,
-                                 WeaponRack, Fountain, Flag, PineModel, TreeCluster, Count };
+                                 WeaponRack, Fountain, Flag, PineModel, TreeCluster, Tents, Count };
 
 struct Decor {
     DecorKind kind;
@@ -103,6 +103,10 @@ private:
     void genNature();
     void genSlipstreams();
     void genVehicles();
+    void genDetails();
+    // Stunt pieces (ramp rises toward dir: 0 +X, 1 -X, 2 +Z, 3 -Z from the low edge centre at x,z)
+    void stuntRamp(float x, float z, int dir, float len, float width, float h, float baseY, Color4 c, bool backPlate = true);
+    void stuntPark(float cx, float cz, const std::string& name);
 
     // building toolkit
     uint32_t box(const Vec3& mn, const Vec3& mx, Material m, Color4 c, float hp = 200, bool destructible = true, uint8_t style = 0);

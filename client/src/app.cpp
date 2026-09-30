@@ -230,6 +230,8 @@ void App::startOffline() {
     o.game.defaultBots = (int)offlineBots_;
     o.game.botDifficulty = (BotDifficulty)offlineDiff_;
     o.game.warmupSeconds = settings_.autotestVehicles ? 1000 : 8;
+    if (const char* sp = std::getenv("STORM_SPAWN_AT")) o.game.debugSpawn = sp;
+    if (const char* ms = std::getenv("STORM_MAP_SEED")) o.game.mapSeed = (uint32_t)std::strtoul(ms, nullptr, 10);
     o.game.countdownSeconds = 5;
     o.game.minHumansToStart = 1;
     o.game.resetAfterMatch = true;
