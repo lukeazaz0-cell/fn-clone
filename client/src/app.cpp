@@ -4,8 +4,11 @@
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <functional>
+#include <vector>
 
 #include "server/runner.h"
+#include "shared/game/items.h"
 #include "ui.h"
 
 namespace client {
@@ -294,7 +297,8 @@ void App::run() {
     settings_.autotest = autotestEnv && *autotestEnv && std::string(autotestEnv) != "0";
     float autoT = 0;
     int autoShot = 0;
-    const float shotTimes[] = {1.0f, 9.0f, 16.0f, 24.0f, 32.0f, 42.0f, 55.0f, 70.0f};
+    const float shotTimes[] = {1.0f, 9.0f, 16.0f, 24.0f, 32.0f, 42.0f, 52.0f, 58.2f, 62.2f, 66.2f, 70.0f};
+    const int shotCount = (int)(sizeof(shotTimes) / sizeof(shotTimes[0]));
     settings_.autotestVehicles = settings_.autotest && std::string(autotestEnv) == "vehicles";
     if (settings_.autotest) { offline_ = true; screen_ = Screen::Lobby; offlineBots_ = 40; offlineDiff_ = 1; offlineLoadout_.outfit = "outfit_arena_trooper"; }
     if (settings_.autotestVehicles) offlineLoadout_.outfit = "";
@@ -312,6 +316,8 @@ void App::run() {
         }
         quit_ = true;
     }
+    const char* galleryEnv = std::getenv("STORM_UI_GALLERY");
+    if (galleryEnv && *galleryEnv && std::string(galleryEnv) != "0") runGallery();
     while (!WindowShouldClose() && !quit_) {
         float dt = std::min(GetFrameTime(), 0.1f);
         if (settings_.autotest) {
@@ -325,7 +331,7 @@ void App::run() {
                 }
                 if (autoT > 130.0f) quit_ = true;
             } else {
-                if (autoShot < 8 && autoT > shotTimes[autoShot]) {
+                if (autoShot < shotCount && autoT > shotTimes[autoShot]) {
                     TakeScreenshot(TextFormat("autotest_%d.png", autoShot));
                     autoShot++;
                 }
@@ -358,6 +364,16 @@ void App::run() {
                 break;
         }
         drawStatus();
+        // Fade in after screen / tab changes
+        if (screen_ != fadeScreen_ || (screen_ == Screen::Lobby && tab_ != fadeTab_)) {
+            fade_ = screen_ != fadeScreen_ ? 1.0f : 0.45f;
+            fadeScreen_ = screen_;
+            fadeTab_ = tab_;
+        }
+        if (fade_ > 0) {
+            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{6, 9, 16, (unsigned char)(255 * ui::ease(fade_))});
+            fade_ = std::max(0.0f, fade_ - dt * 3.5f);
+        }
         EndDrawing();
     }
     saveSettings();
@@ -371,6 +387,90 @@ void App::run() {
     audio_.shutdown();
     ui::unloadFonts();
     CloseWindow();
+}
+
+void App::runGallery() {
+    // Sample data so the online screens have something to show
+    json acc = {{"username", "stormrider"}, {"display_name", "StormRider"}, {"level", 23}, {"coins", 4250}, {"level_progress", 0.62},
+                {"stats", {{"wins", 14}, {"kills", 312}, {"matches", 187}, {"top10", 63}}}};
+    json owned = json::array();
+    int k = 0;
+    for (auto& c : cosmeticCatalog()) if (k++ % 3 != 1) owned.push_back(c.id);
+    json locker = {{"owned", owned}, {"equipped", {{"outfit", ""}, {"backbling", ""}, {"pickaxe", ""}, {"glider", ""}, {"contrail", ""}, {"emotes", json::array()}}}};
+    json shopItems = json::array();
+    k = 0;
+    for (auto& c : cosmeticCatalog()) {
+        if (c.price <= 0 || k >= 8) continue;
+        shopItems.push_back({{"id", c.id}, {"rarity", RARITY_NAMES[(int)c.rarity]}, {"section", k < 2 ? "featured" : "daily"}, {"owned", k == 3}});
+        k++;
+    }
+    json shop = {{"items", shopItems}, {"reset_in", 5 * 3600 + 1234}};
+    json playlists = json::array({{{"id", "solo"}, {"online", 38}}, {{"id", "duos"}, {"online", 12}}, {{"id", "squads"}, {"online", 20}}});
+    json matches = json::array();
+    const char* pls[] = {"solo", "duos", "squads"};
+    for (int i = 0; i < 9; i++)
+        matches.push_back({{"placement", i == 2 ? 1 : 3 + i * 7}, {"playlist", pls[i % 3]}, {"kills", (i * 3) % 7}, {"damage", 120.0 + i * 87}});
+    json board = json::array();
+    const char* names[] = {"StormRider", "Nimbus", "PixelPilot", "Juniper", "Blaze", "Tundra", "Maverick", "Quill", "Echo", "Onyx"};
+    for (int i = 0; i < 10; i++) board.push_back({{"display_name", names[i]}, {"wins", 40 - i * 3}, {"kills", 800 - i * 51}});
+
+    struct Page { const char* name; std::function<void()> setup; };
+    std::vector<Page> pages = {
+        {"icons", [&] {}},
+        {"login", [&] { screen_ = Screen::Login; offline_ = false; }},
+        {"lobby_offline", [&] { screen_ = Screen::Lobby; tab_ = LobbyTab::Play; offline_ = true; account_ = json(); }},
+        {"lobby_online", [&] { screen_ = Screen::Lobby; tab_ = LobbyTab::Play; offline_ = false; account_ = acc; locker_ = locker; playlists_ = playlists;
+                               motd_ = "Welcome to Storm Island! Vehicles have arrived - find a cart, quad, board, trolley or roller ball."; }},
+        {"locker", [&] { tab_ = LobbyTab::Locker; lockerSlot_ = 0; }},
+        {"locker_emotes", [&] { tab_ = LobbyTab::Locker; lockerSlot_ = 5; }},
+        {"shop", [&] { tab_ = LobbyTab::Shop; shop_ = shop; }},
+        {"career", [&] { tab_ = LobbyTab::Career; matches_ = matches; leaderboard_ = board; }},
+        {"settings", [&] { tab_ = LobbyTab::Settings; }},
+        {"matchmaking", [&] { screen_ = Screen::Matchmaking; mmElapsed_ = 17; }},
+    };
+    for (size_t i = 0; i < pages.size() && !WindowShouldClose(); i++) {
+        pages[i].setup();
+        for (int frame = 0; frame < 45; frame++) {
+            BeginDrawing();
+            ClearBackground(ui::BG);
+            ui::beginFrame();
+            if (i == 0) drawIconSheet();
+            else if (screen_ == Screen::Login) drawLogin();
+            else if (screen_ == Screen::Lobby) drawLobby();
+            else if (screen_ == Screen::Matchmaking) drawMatchmaking();
+            EndDrawing();
+        }
+        TakeScreenshot(TextFormat("gallery_%02d_%s.png", (int)i, pages[i].name));
+    }
+    quit_ = true;
+}
+
+void App::drawIconSheet() {
+    float W = (float)GetScreenWidth();
+    float s = ui::scale();
+    DrawRectangleGradientV(0, 0, (int)W, GetScreenHeight(), Color{30, 40, 64, 255}, Color{12, 16, 27, 255});
+    ui::text("Icons", 30 * s, 20 * s, 28, WHITE);
+    for (int i = 0; i <= (int)ui::Icon::Close; i++) {
+        float x = 60 * s + (i % 15) * 100 * s, y = 110 * s + (i / 15) * 100 * s;
+        ui::rrect({x - 40 * s, y - 40 * s, 80 * s, 80 * s}, 12, Color{255, 255, 255, 14});
+        ui::icon((ui::Icon)i, x, y, 56 * s, i % 3 == 0 ? ui::PLAY : i % 3 == 1 ? WHITE : ui::ACCENT);
+    }
+    ui::text("Items", 30 * s, 300 * s, 28, WHITE);
+    for (int t = 1; t < (int)si::ItemType::AmmoPickup; t++) {
+        float x = 70 * s + ((t - 1) % 10) * 150 * s, y = 390 * s + ((t - 1) / 10) * 110 * s;
+        Rectangle r{x - 60 * s, y - 45 * s, 120 * s, 90 * s};
+        ui::rrectGrad(r, 12, Color{50, 60, 90, 255}, ui::rarityColor(t % 5));
+        ui::itemIcon((unsigned char)t, x, y - 6 * s, 86 * s, WHITE);
+        ui::textCentered(itemDef((si::ItemType)t).name, x, y + 26 * s, 12, WHITE);
+    }
+    ui::bigButton({30 * s, GetScreenHeight() - 130 * s, 360 * s, 100 * s}, "PLAY", "SOLO - 40 BOTS");
+    ui::button({420 * s, GetScreenHeight() - 110 * s, 200 * s, 50 * s}, "Primary", true);
+    ui::button({640 * s, GetScreenHeight() - 110 * s, 200 * s, 50 * s}, "Secondary");
+    ui::keycap("E", 870 * s, GetScreenHeight() - 105 * s, 34 * s);
+    ui::keycap("Shift", 920 * s, GetScreenHeight() - 105 * s, 34 * s);
+    ui::chip("23 alive", 1030 * s, GetScreenHeight() - 105 * s, 16, WHITE, Color{0, 0, 0, 140}, ui::Icon::Person, true);
+    ui::meter({1180 * s, GetScreenHeight() - 100 * s, 260 * s, 22 * s}, 0.7f, ui::SHIELD, Color{0, 0, 0, 150}, 4);
+    ui::ring({1500 * s, GetScreenHeight() - 90 * s}, 30 * s, 6 * s, 0.66f, WHITE, Color{0, 0, 0, 120});
 }
 
 } // namespace client

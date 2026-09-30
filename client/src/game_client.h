@@ -178,6 +178,12 @@ private:
     uint8_t lastPhase_ = 255;
     float stormTickSound_ = 0;
     std::string interactPrompt_;
+    // HUD: location banner when entering a named place
+    std::string poiName_;
+    float poiBanner_ = 0;
+    void hudCompass();
+    void hudTopRight();
+    void hudLocationBanner(float dt);
 
     void initMap(uint32_t seed);
     void applySnapshot(const Snapshot& s);

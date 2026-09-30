@@ -836,6 +836,12 @@ bool GameClient::frame(float dt) {
         return !leave_;
     }
 
+    // Autotest: open the inventory, map and pause menu near the end for screenshots
+    if (settings_.autotest && !settings_.autotestVehicles && haveSelf_) {
+        inventoryOpen_ = time_ > 55.5f && time_ < 58.5f && localControllable();
+        mapOpen_ = time_ > 59.5f && time_ < 62.5f;
+        paused_ = time_ > 63.5f && time_ < 66.5f;
+    }
     // --- overlays & discrete keys
     bool overlay = mapOpen_ || inventoryOpen_ || paused_;
     if (IsKeyPressed(KEY_ESCAPE)) {

@@ -98,6 +98,13 @@ private:
     void drawPreview(Rectangle area, const Loadout& l);
     // STORM_SHOWROOM=1: renders every vehicle (with riders) from a few angles for screenshots.
     void drawShowroom(int view, float t);
+    // STORM_UI_GALLERY=1: renders every menu screen with sample data and saves gallery_N.png.
+    void runGallery();
+    // Short fade when the screen or lobby tab changes
+    Screen fadeScreen_ = Screen::Login;
+    LobbyTab fadeTab_ = LobbyTab::Play;
+    float fade_ = 1.0f;
+    void drawIconSheet();
     void drawStatus();
 };
 

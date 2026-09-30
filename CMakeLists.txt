@@ -124,6 +124,7 @@ if(STORM_BUILD_CLIENT)
     client/src/hud.cpp
     client/src/menus.cpp
     client/src/ui.cpp
+    client/src/icons.cpp
     client/src/audio.cpp
     client/src/game_client.cpp
   )
