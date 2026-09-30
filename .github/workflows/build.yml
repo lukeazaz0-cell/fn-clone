@@ -104,7 +104,7 @@ jobs:
       - name: Smoke test container
         run: |
           docker run -d --name storm -p 8080:8080 -e STORM_ADMIN_PASSWORD=ci-password stormisland-backend:ci
-          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/health && break; sleep 1; done
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/health 2>/dev/null && break; sleep 1; done
           curl -fsS -o /dev/null http://127.0.0.1:8080/admin
           TOKEN=$(curl -fsS -X POST http://127.0.0.1:8080/api/register -d '{"username":"citest","password":"ci-pass-123"}' | jq -r .token)
           TICKET=$(curl -fsS -X POST http://127.0.0.1:8080/api/matchmaking/join -H "Authorization: Bearer $TOKEN" -d '{"playlist":"solo"}' | jq -r .ticket)
@@ -115,8 +115,9 @@ jobs:
             sleep 1
           done
           echo "$STATUS" | jq -e '.status == "assigned"'
-          docker exec storm pgrep -f stormisland-server
-          docker logs storm
+          sleep 2
+          docker logs storm 2>&1 | tee container.log
+          grep -q "game server registered" container.log
           docker stop storm
 
       - name: Image metadata
